@@ -1,18 +1,18 @@
 # DfoGmTool
 
 > S4A21 (86jp) 服务端的 Web GM 控制台 — 基于 [rewio/DfoGmTool](https://codeberg.org/rewio/DfoGmTool) 深度重构
->
+> 
 > 当前发布版 **v260824** · 对齐 S4A21 服务端、数据库结构示例 **schema v8** · MIT License
 
 独立进程运行，读取服务端部署目录里的 `inventory.db` 和 `Script.pvf`；浏览器打开 `http://localhost:5050` 即可使用。发放页默认“邮件发放”，搜索框左侧的单按钮可切换“邮件发放/背包发放”并记忆选择；从邮件切入背包只在该次切换确认一次，刷新恢复已记忆的背包模式不再提示，也没有常驻警告，列表和配置提交文案会随模式更新。请求缺失、空白或未知的 `deliveryMode` 安全回退为邮件。邮件模式下普通装备、装扮、宠物、消耗品、晶块和复活币通过系统邮件发放；背包模式下普通物品复用新版背包直写，晶块直充账号共享状态，复活币直充角色虚拟钱包，容量不足会整体失败回滚。名称装饰卡始终直写 `character_name_tag_state`，`PremiumCatalog` 契约始终直写账号契约状态，不受模式切换影响。邮件项目关闭并重新打开邮箱即可，背包和专用直发项目通常需重新选择角色刷新。其他管理功能继续使用经过结构兼容门禁的数据库服务。源码自包含，不依赖任何本地相邻仓库即可构建和发布。
 
 🔗 **仓库地址**
 
-| 平台 | 地址 |
-|------|------|
+| 平台       | 地址                                            |
+| -------- | --------------------------------------------- |
 | Codeberg | <https://codeberg.org/Liuxiny/86jp_DfoGmTool> |
-| GitHub | <https://github.com/Liuxiny/86jp_DfoGmTool> |
-| 上游原版 | <https://codeberg.org/rewio/DfoGmTool> |
+| GitHub   | <https://github.com/Liuxiny/86jp_DfoGmTool>   |
+| 上游原版     | <https://codeberg.org/rewio/DfoGmTool>        |
 
 ---
 
@@ -59,6 +59,10 @@
 **技能点** — SP/TP 真实剩余/总量查看（区分技能方案页），附加点调整带合法性校验，一键剩余归零：
 
 ![技能点管理](Pic/09_Character_Skill.png)
+
+### 修改用户名
+
+![d8ad08d5-f177-45b7-b622-346012f2a010](file:///C:/Users/morning/Pictures/Typedown/d8ad08d5-f177-45b7-b622-346012f2a010.png)
 
 ### 任务系统
 
@@ -128,60 +132,60 @@
 
 ### 新增服务文件（6 个全新模块）
 
-| 文件 | 行数 | 功能 |
-|------|------|------|
-| `GmService.AccountBackup.cs` | 940 | 完整账号备份与还原 — 遍历数据库全部关联表（30+ 张表按依赖顺序），导出账号及其角色的所有数据为 JSON，还原时处理外键约束、宠物句柄冲突、角色槽位索引重建、已废弃表兼容 |
-| `GmService.CharacterClone.cs` | 738 | 角色复制 — 25 个可选复制类别（背包各分区、装备、装扮、宠物、技能、任务、称号簿、每日/周常、地图难度等），支持跨账号复制、新建目标账号（MD5 密码）、宠物句柄重映射、主键冲突规避 |
-| `GmService.CharacterFixes.cs` | 344 | 转职/觉醒重写 — `SetGrowTypeFixed` 增加 PVF 校验 (`TryValidateJobGrowOption`)、等级前置检查、转职后技能列表重建 (`CharacterSkillProfile.BuildSnapshot`) 或觉醒技能合并 (`MergeGrants`)、转职任务状态同步 |
-| `GmService.CharacterSpTp.cs` | 226 | SP/TP 管理 — `AdjustSpTpSynced` 每次调整后同步技能点状态（区分双技能方案页），调整前校验负数保护；新增 `ZeroRemainingSpTp` 一键归零 |
-| `GmService.InventoryConfiguration.cs` | 694 | 背包物品在线配置 — 直接修改新版 `ItemCore` 的强化、增幅、锻造、红字、品级、期限与装扮能力字段，并维护装扮明细引用 |
-| `PvfIndexService.Dungeons.cs` | ~60 | 地下城权限数据读取 |
+| 文件                                    | 行数  | 功能                                                                                                                                                            |
+| ------------------------------------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GmService.AccountBackup.cs`          | 940 | 完整账号备份与还原 — 遍历数据库全部关联表（30+ 张表按依赖顺序），导出账号及其角色的所有数据为 JSON，还原时处理外键约束、宠物句柄冲突、角色槽位索引重建、已废弃表兼容                                                                      |
+| `GmService.CharacterClone.cs`         | 738 | 角色复制 — 25 个可选复制类别（背包各分区、装备、装扮、宠物、技能、任务、称号簿、每日/周常、地图难度等），支持跨账号复制、新建目标账号（MD5 密码）、宠物句柄重映射、主键冲突规避                                                                 |
+| `GmService.CharacterFixes.cs`         | 344 | 转职/觉醒重写 — `SetGrowTypeFixed` 增加 PVF 校验 (`TryValidateJobGrowOption`)、等级前置检查、转职后技能列表重建 (`CharacterSkillProfile.BuildSnapshot`) 或觉醒技能合并 (`MergeGrants`)、转职任务状态同步 |
+| `GmService.CharacterSpTp.cs`          | 226 | SP/TP 管理 — `AdjustSpTpSynced` 每次调整后同步技能点状态（区分双技能方案页），调整前校验负数保护；新增 `ZeroRemainingSpTp` 一键归零                                                                    |
+| `GmService.InventoryConfiguration.cs` | 694 | 背包物品在线配置 — 直接修改新版 `ItemCore` 的强化、增幅、锻造、红字、品级、期限与装扮能力字段，并维护装扮明细引用                                                                                              |
+| `PvfIndexService.Dungeons.cs`         | ~60 | 地下城权限数据读取                                                                                                                                                     |
 
 ### 显著扩展的服务文件
 
-| 文件 | 旧 → 新 | 新增内容 |
-|------|---------|----------|
-| `GmService.Characters.cs` | 18KB → 38KB | `DeleteCharacterPermanently`（二次确认 + 种子角色兜底优选同账号角色）、`UnlockExtraEquipmentSlots`、`UnlockDungeonPermissions`、`MaxPersonalCargo`、`SetWalletValue`（金币/复活币/技能点按类型覆写） |
-| `GmService.Inventory.cs` | 19KB → 56KB | `GiveItem` 支持 `ItemGrantOptions` 与 `deliveryMode` 邮件/背包分流；装备发放走 `EquipmentGrantPolicy` 和 `AmplifyInitialValueResolver`，装扮发放按职业过滤走 `AvatarGrantPolicy`，PVF 不存在的物品禁止发放 |
-| `GmService.Quests.cs` | 35KB → 73KB | `AllVisibleQuestOverview`（按区域展示全部可见任务）、`CompleteCurrentLevelMainQuests/SideQuests/SystemQuests/NoItemAchievementQuests`（按当前等级批量完成）、`CompleteProfessionQuests`、`ResetVisibleDailyQuests`、`CompleteVisibleQuestBatch`、`CompleteExtraEquipmentSlotQuests`、`UnclearQuestBatch`、任务搜索增加 `grade`/`region` 过滤 |
-| `GmService.TitleBook.cs` | 4.6KB → 11KB | `CompleteAllTitleBook` 扩展为完整的批量完成实现 |
-| `PvfIndexService.Jobs.cs` | 6KB → 13KB | `TryValidateJobGrowOption` — 转职/觉醒写入前的 PVF 校验 |
-| `PvfIndexService.Quests.cs` | 10KB → 18KB | `AllQuestMeta` 属性，任务按区域/等级/类型的多维查询 |
-| `PvfIndexService.Items.cs` | 17KB → 25KB | `SearchItems` 新增 `usableJob` 可用职业过滤 |
+| 文件                          | 旧 → 新        | 新增内容                                                                                                                                                                                                                                                                                                  |
+| --------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GmService.Characters.cs`   | 18KB → 38KB  | `DeleteCharacterPermanently`（二次确认 + 种子角色兜底优选同账号角色）、`UnlockExtraEquipmentSlots`、`UnlockDungeonPermissions`、`MaxPersonalCargo`、`SetWalletValue`（金币/复活币/技能点按类型覆写）                                                                                                                                        |
+| `GmService.Inventory.cs`    | 19KB → 56KB  | `GiveItem` 支持 `ItemGrantOptions` 与 `deliveryMode` 邮件/背包分流；装备发放走 `EquipmentGrantPolicy` 和 `AmplifyInitialValueResolver`，装扮发放按职业过滤走 `AvatarGrantPolicy`，PVF 不存在的物品禁止发放                                                                                                                                  |
+| `GmService.Quests.cs`       | 35KB → 73KB  | `AllVisibleQuestOverview`（按区域展示全部可见任务）、`CompleteCurrentLevelMainQuests/SideQuests/SystemQuests/NoItemAchievementQuests`（按当前等级批量完成）、`CompleteProfessionQuests`、`ResetVisibleDailyQuests`、`CompleteVisibleQuestBatch`、`CompleteExtraEquipmentSlotQuests`、`UnclearQuestBatch`、任务搜索增加 `grade`/`region` 过滤 |
+| `GmService.TitleBook.cs`    | 4.6KB → 11KB | `CompleteAllTitleBook` 扩展为完整的批量完成实现                                                                                                                                                                                                                                                                   |
+| `PvfIndexService.Jobs.cs`   | 6KB → 13KB   | `TryValidateJobGrowOption` — 转职/觉醒写入前的 PVF 校验                                                                                                                                                                                                                                                         |
+| `PvfIndexService.Quests.cs` | 10KB → 18KB  | `AllQuestMeta` 属性，任务按区域/等级/类型的多维查询                                                                                                                                                                                                                                                                    |
+| `PvfIndexService.Items.cs`  | 17KB → 25KB  | `SearchItems` 新增 `usableJob` 可用职业过滤                                                                                                                                                                                                                                                                   |
 
 ### 新增 ServerCore 源码
 
-| 文件 | 作用 |
-|------|------|
-| `ItemGrantOptions.cs` | 发放物品时的装备配置参数模型（品级模式、强化等级、红字类型、锻造等级、期限天数、装扮属性） |
-| `CharacterSkillProfile.cs` | 转职后技能列表构建 — `BuildSnapshot` 从零构建、`GetGrowTypeGrants`/`MergeGrants` 觉醒技能合并 |
-| `SkillPointLedger.cs` | 技能点收支追踪（双技能方案页） |
-| `SkillSlotAllocator.cs` | 技能栏位分配 |
-| `AmplifyInitialValueResolver.cs` | 增幅初始值解析（红字属性写入时使用） |
-| `AvatarAbilityDataProvider.cs` | 从 PVF `skill/abilitydatas.dat` 和 `etc/avatarabilitystringtable.etc` 动态读取装扮能力数据 |
-| `AvatarDurationResolver.cs` | 从 PVF 读取装扮期限档位 |
-| `AwakeningSkillGrantProvider.cs` | 觉醒技能授予（配合 `awakening_skill_grants.json`） |
-| `ActiveQuest.cs` | 活动任务模型 |
-| `PremiumCatalog.cs` | 高级目录数据 |
+| 文件                               | 作用                                                                             |
+| -------------------------------- | ------------------------------------------------------------------------------ |
+| `ItemGrantOptions.cs`            | 发放物品时的装备配置参数模型（品级模式、强化等级、红字类型、锻造等级、期限天数、装扮属性）                                  |
+| `CharacterSkillProfile.cs`       | 转职后技能列表构建 — `BuildSnapshot` 从零构建、`GetGrowTypeGrants`/`MergeGrants` 觉醒技能合并      |
+| `SkillPointLedger.cs`            | 技能点收支追踪（双技能方案页）                                                                |
+| `SkillSlotAllocator.cs`          | 技能栏位分配                                                                         |
+| `AmplifyInitialValueResolver.cs` | 增幅初始值解析（红字属性写入时使用）                                                             |
+| `AvatarAbilityDataProvider.cs`   | 从 PVF `skill/abilitydatas.dat` 和 `etc/avatarabilitystringtable.etc` 动态读取装扮能力数据 |
+| `AvatarDurationResolver.cs`      | 从 PVF 读取装扮期限档位                                                                 |
+| `AwakeningSkillGrantProvider.cs` | 觉醒技能授予（配合 `awakening_skill_grants.json`）                                       |
+| `ActiveQuest.cs`                 | 活动任务模型                                                                         |
+| `PremiumCatalog.cs`              | 高级目录数据                                                                         |
 
 ### 新增前端模块
 
-| 文件 | 大小 | 作用 |
-|------|------|------|
-| `floating-config.js` | 6KB | 浮动配置卡片 — 装备和装扮发放/背包配置统一使用的弹出式配置面板 |
-| `character-sp-overrides.js` | 3.4KB | SP/TP 附加点调整和归零 UI |
-| `item-page-size.js` | 1.5KB | 搜索结果动态分页大小控制 |
+| 文件                          | 大小    | 作用                                |
+| --------------------------- | ----- | --------------------------------- |
+| `floating-config.js`        | 6KB   | 浮动配置卡片 — 装备和装扮发放/背包配置统一使用的弹出式配置面板 |
+| `character-sp-overrides.js` | 3.4KB | SP/TP 附加点调整和归零 UI                 |
+| `item-page-size.js`         | 1.5KB | 搜索结果动态分页大小控制                      |
 
 ### 显著扩展的前端文件
 
-| 文件 | 旧 → 新 | 主要变更 |
-|------|---------|----------|
-| `give.js` | 10KB → 31KB | 装备/装扮/期限道具不再直接行内发放，改为弹出配置卡片确认；装备配置（品级/强化/增幅/锻造/红字）、装扮配置（职业过滤后的部位属性/上衣技能）、期限配置 |
-| `character.js` | 4KB → 17KB | 角色删除（带确认框需输入"删除角色"）、角色复制 UI、地下城难度解锁、额外装备栏位解锁、个人仓库满级 |
-| `inventory.js` | 9.7KB → 19KB | 可配置装备/装扮显示「配置」按钮、浮动配置卡片集成、期限修改 |
-| `quests.js` | 18KB → 34KB | 全部可见任务视图、当前等级一键完成（主线/支线/系统/成就）、每日任务重置、副职业任务完成、批量取消完成、装备栏位任务 |
-| `sidebar.js` | 14KB → 17KB | 新功能入口 |
-| `bindings.js` | 3.5KB → 6.2KB | 新增模块的事件绑定 |
+| 文件             | 旧 → 新         | 主要变更                                                                          |
+| -------------- | ------------- | ----------------------------------------------------------------------------- |
+| `give.js`      | 10KB → 31KB   | 装备/装扮/期限道具不再直接行内发放，改为弹出配置卡片确认；装备配置（品级/强化/增幅/锻造/红字）、装扮配置（职业过滤后的部位属性/上衣技能）、期限配置 |
+| `character.js` | 4KB → 17KB    | 角色删除（带确认框需输入"删除角色"）、角色复制 UI、地下城难度解锁、额外装备栏位解锁、个人仓库满级                           |
+| `inventory.js` | 9.7KB → 19KB  | 可配置装备/装扮显示「配置」按钮、浮动配置卡片集成、期限修改                                                |
+| `quests.js`    | 18KB → 34KB   | 全部可见任务视图、当前等级一键完成（主线/支线/系统/成就）、每日任务重置、副职业任务完成、批量取消完成、装备栏位任务                   |
+| `sidebar.js`   | 14KB → 17KB   | 新功能入口                                                                         |
+| `bindings.js`  | 3.5KB → 6.2KB | 新增模块的事件绑定                                                                     |
 
 ### 主要新增 API 端点
 
@@ -225,25 +229,25 @@ POST /api/characters/{id}/quests/equipment-slots/complete 完成装备栏位任�
 
 ### 变更的 API 签名
 
-| 旧签名 | 新签名 | 变更原因 |
-|--------|--------|----------|
+| 旧签名                                         | 新签名                                                                           | 变更原因                                                                             |
+| ------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `GiveItem(id, templateId, count, pvfIndex)` | `GiveItem(id, templateId, count, options, pvfIndex, requestId, deliveryMode)` | 新增 `ItemGrantOptions`，以及邮件/背包模式分流；缺失或未知 `deliveryMode` 安全回退邮件，`requestId` 用于邮件幂等 |
-| `SetGrowType(id, first, second)` | `SetGrowTypeFixed(id, job, first, second)` | 新增职业参数 + PVF 校验 + 技能重建 |
-| `AdjustSpTp(id, sp, tp)` | `AdjustSpTpSynced(id, sp, tp)` | 调整后同步技能点状态 + 负数保护 |
-| `GetGrowOptions(id)` | `GetGrowOptions(id, job)` | 支持指定职业查询 |
-| `SearchQuests(id, q, limit, pvfIndex)` | `SearchQuests(id, q, grade, region, limit, pvfIndex)` | 新增类型/区域过滤 |
-| `SearchItems(..., expiration)` | `SearchItems(..., expiration, usableJob)` | 新增可用职业过滤 |
+| `SetGrowType(id, first, second)`            | `SetGrowTypeFixed(id, job, first, second)`                                    | 新增职业参数 + PVF 校验 + 技能重建                                                           |
+| `AdjustSpTp(id, sp, tp)`                    | `AdjustSpTpSynced(id, sp, tp)`                                                | 调整后同步技能点状态 + 负数保护                                                                |
+| `GetGrowOptions(id)`                        | `GetGrowOptions(id, job)`                                                     | 支持指定职业查询                                                                         |
+| `SearchQuests(id, q, limit, pvfIndex)`      | `SearchQuests(id, q, grade, region, limit, pvfIndex)`                         | 新增类型/区域过滤                                                                        |
+| `SearchItems(..., expiration)`              | `SearchItems(..., expiration, usableJob)`                                     | 新增可用职业过滤                                                                         |
 
 ### 自测框架
 
 `SelfTests/` 目录包含五个自测入口：
 
-| 文件 | 行数 | 覆盖范围 |
-|------|------|----------|
-| `DatabaseCompatibilitySelfTest.cs` | — | 数据库 schema/结构兼容性门禁 |
-| `ItemGrantOptionsSelfTest.cs` | ~500 | 装备/装扮/可叠加/期限物品的 `ItemGrantOptions` 处理逻辑 |
-| `CharacterMutationSelfTest.cs` | ~1400 | 等级/经验、转职/觉醒、普通/PVP 技能隔离、任务 activation/CAS/事件隔离、账号级地下城权限、角色复制/备份/删除生命周期；邮件堆叠拆分/多邮件幂等回滚、当前角色邮箱清空与共享邮件安全；GiveItem 的 mail/inventory 分流、普通物品/晶块/复活币直发回滚、名称装饰卡与契约专用直写 |
-| `InventoryMaintenanceSelfTest.cs` | — | PVF 合法 ID、全账号新版角色库存/账号金库异常扫描与清理、虚拟货币槽排除、关联状态精确清理、事务回滚与二次幂等 |
+| 文件                                 | 行数    | 覆盖范围                                                                                                                                                            |
+| ---------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DatabaseCompatibilitySelfTest.cs` | —     | 数据库 schema/结构兼容性门禁                                                                                                                                              |
+| `ItemGrantOptionsSelfTest.cs`      | ~500  | 装备/装扮/可叠加/期限物品的 `ItemGrantOptions` 处理逻辑                                                                                                                         |
+| `CharacterMutationSelfTest.cs`     | ~1400 | 等级/经验、转职/觉醒、普通/PVP 技能隔离、任务 activation/CAS/事件隔离、账号级地下城权限、角色复制/备份/删除生命周期；邮件堆叠拆分/多邮件幂等回滚、当前角色邮箱清空与共享邮件安全；GiveItem 的 mail/inventory 分流、普通物品/晶块/复活币直发回滚、名称装饰卡与契约专用直写 |
+| `InventoryMaintenanceSelfTest.cs`  | —     | PVF 合法 ID、全账号新版角色库存/账号金库异常扫描与清理、虚拟货币槽排除、关联状态精确清理、事务回滚与二次幂等                                                                                                      |
 
 ---
 
@@ -289,13 +293,13 @@ POST /api/characters/{id}/quests/equipment-slots/complete 完成装备栏位任�
 
 **物品交付规则**：发放页默认“邮件发放”，搜索框左侧的单按钮可切换“背包发放”；请求缺失、空白或未知 `deliveryMode` 安全回退邮件。名称装饰卡与 `PremiumCatalog` 契约始终使用专用直写状态，不创建邮件：
 
-| 物品类型 | 邮件发放（默认） | 背包发放 |
-|----------|------------------|----------|
-| **普通装备、装扮、宠物与消耗品** | GM 按同步的服务端规则创建并冻结 `ItemCore` 邮件附件快照，玩家领取时由服务端校验并写入对应容器 | 复用新版 `NewInventoryStore.TryGrant` 直接写对应容器；背包容量不足整批失败回滚，完成后通常需重新选择角色；不宣称邮件式跨重启持久幂等 |
-| **晶块（六种）** | 通过系统邮件发放，领取附件时进入账号共享晶块槽，不占用普通背包格 | 直接充入账号共享晶块状态，完成后通常需重新选择角色 |
-| **复活币道具** | 通过系统邮件发放，领取附件时进入角色虚拟钱包槽 | 直接充入角色虚拟钱包，完成后通常需重新选择角色 |
-| **名称装饰卡** | 直写 `character_name_tag_state`，不创建邮件；发放后需重新选择角色刷新 | 同左，模式切换不改变专用直写 |
-| **契约（`PremiumCatalog`）** | 直写账号契约状态，不创建邮件；发放后需重新选择角色刷新 | 同左，模式切换不改变专用直写 |
+| 物品类型                     | 邮件发放（默认）                                               | 背包发放                                                                              |
+| ------------------------ | ------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| **普通装备、装扮、宠物与消耗品**       | GM 按同步的服务端规则创建并冻结 `ItemCore` 邮件附件快照，玩家领取时由服务端校验并写入对应容器 | 复用新版 `NewInventoryStore.TryGrant` 直接写对应容器；背包容量不足整批失败回滚，完成后通常需重新选择角色；不宣称邮件式跨重启持久幂等 |
+| **晶块（六种）**               | 通过系统邮件发放，领取附件时进入账号共享晶块槽，不占用普通背包格                       | 直接充入账号共享晶块状态，完成后通常需重新选择角色                                                         |
+| **复活币道具**                | 通过系统邮件发放，领取附件时进入角色虚拟钱包槽                                | 直接充入角色虚拟钱包，完成后通常需重新选择角色                                                           |
+| **名称装饰卡**                | 直写 `character_name_tag_state`，不创建邮件；发放后需重新选择角色刷新       | 同左，模式切换不改变专用直写                                                                    |
+| **契约（`PremiumCatalog`）** | 直写账号契约状态，不创建邮件；发放后需重新选择角色刷新                            | 同左，模式切换不改变专用直写                                                                    |
 
 邮件模式的堆叠附件按 PVF stack limit 拆分，每封最多 10 个附件、单次最多 10 封/100 个附件；超过上限会拒绝。整批邮件使用一个 SQLite IMMEDIATE 事务原子提交并按请求编号幂等；背包模式不宣称邮件式持久幂等。
 
@@ -409,6 +413,7 @@ dotnet publish DfoGmTool.csproj -c Release -r linux-x64 --self-contained true -o
 ```
 
 代码无 P/Invoke、无 Windows 专属编码，SQLite 原生库随发布件自带。注意：
+
 - 可执行文件需要 `chmod +x DfoGmTool`
 - Linux 文件系统区分大小写，路径必须是 `Data/inventory.db`、`Data/Pvf/Script.pvf` 的准确大小写
 
