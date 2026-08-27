@@ -1,0 +1,18 @@
+[Unit]
+Description=DFO GM Tool
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/srv/86jpgmtool/dist/
+ExecStart=/srv/86jpgmtool/dist/DfoGmTool
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

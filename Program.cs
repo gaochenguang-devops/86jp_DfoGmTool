@@ -243,6 +243,8 @@ namespace DfoGmTool
             app.MapGet("/api/characters/{id:int}/sptp", (int id) => WithRuntime((gm, _) => gm.GetSpTp(id)));
             app.MapGet("/api/characters/{id:int}/clone-plan", (int id) => WithRuntime((gm, _) => gm.GetCharacterClonePlan(id)));
             app.MapGet("/api/characters/name-available", (string name) => WithRuntime((gm, _) => gm.CheckCharacterNameAvailable(name)));
+            app.MapPost("/api/characters/{id:int}/rename", (int id, RenameCharacterRequest body) =>
+                WithRuntime((gm, _) => gm.RenameCharacter(id, body?.NewName)));
 
             app.MapPost("/api/characters/{id:int}/items", (int id, ItemRequest body) =>
                 WithRuntime((gm, pvfIndex) => gm.GiveItem(
@@ -410,6 +412,11 @@ namespace DfoGmTool
         public int Amount { get; set; }
     }
 
+    public sealed class RenameCharacterRequest
+    {
+        public string NewName { get; set; }
+    }
+
     public sealed class CeraRequest
     {
         public int Amount { get; set; }
@@ -514,4 +521,3 @@ namespace DfoGmTool
         public string ConfirmPassword { get; set; }
     }
 }
-

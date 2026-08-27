@@ -45,6 +45,7 @@ $('#btn-max-personal-cargo').onclick = maxPersonalCargo;
 $('#btn-unlock-equipment-slots').onclick = unlockExtraEquipmentSlots;
 $('#btn-unlock-dungeon-permissions').onclick = unlockDungeonPermissions;
 $('#btn-delete-character').onclick = deleteCurrentCharacter;
+$('#btn-rename-character').onclick = renameCurrentCharacter;
 $('#btn-jump-character-currency').onclick = jumpToCharacterCurrency;
 $('#btn-jump-account-currency').onclick = jumpToAccountCurrency;
 $('#btn-open-character-clone').onclick = openCharacterClonePanel;

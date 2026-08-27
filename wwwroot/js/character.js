@@ -123,6 +123,35 @@ async function deleteCurrentCharacter() {
   }
 }
 
+async function renameCurrentCharacter() {
+  if (!currentChar) return;
+  const character = currentChar;
+  const input = $('#rename-character-name');
+  const newName = input.value.trim();
+  if (!newName) return toast('请输入新角色名', true);
+  if (newName === character.name) return toast('新角色名与当前名称相同', true);
+
+  const btn = $('#btn-rename-character');
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '正在改名...';
+  try {
+    const result = await post(`/api/characters/${character.characterId}/rename`, { newName });
+    toast(`角色已改名为 ${result.name}；请重新进入角色刷新客户端状态`);
+    input.value = result.name;
+    const accountId = parseInt($('#account-select').value, 10);
+    await refreshAccountsSidebar();
+    await loadCharacters(accountId);
+    const characterRow = document.querySelector(`#char-list li[data-character-id="${character.characterId}"]`);
+    await selectCharacter(character.characterId, characterRow);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
 let characterClonePlan = null;
 let cloneNameAvailable = false;
 let cloneRequestRunning = false;

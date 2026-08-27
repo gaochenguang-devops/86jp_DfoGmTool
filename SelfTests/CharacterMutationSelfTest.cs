@@ -82,6 +82,7 @@ namespace DfoGmTool.SelfTests
                 CheckCloneCharacterSlotIsolation(gm, tempDb);
                 CheckAccountBackupRestoreSlotCompatibility(gm, tempDb);
                 CheckMailboxClear(gm, tempDb);
+                CheckCharacterRename(gm, tempDb);
                 CheckDeleteCharacterSeedFallback(gm, tempDb);
 
                 Console.WriteLine(_failures == 0
@@ -2665,6 +2666,43 @@ WHERE a.audit_id={restoredAuditId} AND a.message_id={restoredMessageId}
             }
         }
 
+        private static void CheckCharacterRename(GmService gm, string dbPath)
+        {
+            const string newName = "角色改名自测";
+            using (var conn = Open(dbPath))
+            using (var tx = conn.BeginTransaction())
+            {
+                Exec(conn, tx, @"
+INSERT INTO characters(character_id, account_id, name, job, grow_type, level, exp)
+VALUES(926017, 926014, 'rename-duplicate-selftest', 0, 0, 1, 0);");
+                tx.Commit();
+            }
+
+            var renamed = gm.RenameCharacter(CharacterId, newName);
+            Check("character rename updates text and byte name fields",
+                IsSuccess(renamed)
+                && GetStringProperty(renamed, "name") == newName
+                && LoadTextOrUtf8Blob(dbPath, $"SELECT name FROM characters WHERE character_id={CharacterId};") == newName
+                && LoadTextOrUtf8Blob(dbPath, $"SELECT name_bytes FROM characters WHERE character_id={CharacterId};") == newName);
+
+            var duplicate = gm.RenameCharacter(926017, newName);
+            Check("character rename rejects an active duplicate name",
+                !IsSuccess(duplicate)
+                && (GetStringProperty(duplicate, "error") ?? string.Empty).Contains("已存在", StringComparison.Ordinal));
+
+            var invalid = gm.RenameCharacter(CharacterId, "x");
+            Check("character rename reuses UTF-8 name validation",
+                !IsSuccess(invalid)
+                && (GetStringProperty(invalid, "error") ?? string.Empty).Contains("2-18", StringComparison.Ordinal));
+
+            using (var conn = Open(dbPath))
+            using (var tx = conn.BeginTransaction())
+            {
+                Exec(conn, tx, "DELETE FROM characters WHERE character_id=926017;");
+                tx.Commit();
+            }
+        }
+
         private static void CheckDeleteCharacterSeedFallback(GmService gm, string dbPath)
         {
             using (var conn = Open(dbPath))
@@ -3005,6 +3043,21 @@ INSERT INTO character_skills(character_id, page_index, slot, skill_id, level) VA
             {
                 cmd.CommandText = sql;
                 return Convert.ToInt32(cmd.ExecuteScalar());
+            }
+        }
+
+        private static string LoadTextOrUtf8Blob(string dbPath, string sql)
+        {
+            using (var conn = Open(dbPath))
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = sql;
+                var value = cmd.ExecuteScalar();
+                if (value is byte[] bytes)
+                    return System.Text.Encoding.UTF8.GetString(bytes);
+                return value == null || value == DBNull.Value
+                    ? null
+                    : Convert.ToString(value);
             }
         }
 
