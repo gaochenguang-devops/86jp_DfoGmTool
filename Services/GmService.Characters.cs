@@ -838,7 +838,17 @@ LIMIT 1;",
         {
             if (bytes == null || bytes.Length == 0)
                 return string.Empty;
-            return System.Text.Encoding.UTF8.GetString(bytes);
+
+            try
+            {
+                // 不能使用 Encoding.UTF8 的替换回退：旧版 GBK/GB18030 名称会被悄悄替换成 �。
+                return new System.Text.UTF8Encoding(false, true).GetString(bytes);
+            }
+            catch (System.Text.DecoderFallbackException)
+            {
+                System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+                return System.Text.Encoding.GetEncoding("GB18030").GetString(bytes);
+            }
         }
 
         // 玩家实际看到的 SP/TP: 总点数(等级表+加成) 与 剩余点数(扣除已学技能),

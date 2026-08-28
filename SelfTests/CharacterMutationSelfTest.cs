@@ -27,6 +27,7 @@ namespace DfoGmTool.SelfTests
         {
             _failures = 0;
             Console.WriteLine("=== CHARACTER_MUTATIONS selftest ===");
+            CheckCharacterNameDecoding();
 
             var tempDb = Path.Combine(Path.GetTempPath(), "dfogm-character-mutations-" + Guid.NewGuid().ToString("N") + ".db");
             try
@@ -161,6 +162,16 @@ namespace DfoGmTool.SelfTests
                 && pvfIndex.TryValidateJobGrowOption(10, 0, 2, out _)
                 && pvfIndex.ResolveJobName(10, 0x10) != null
                 && pvfIndex.ResolveJobName(10, 0x20) != null);
+        }
+
+        private static void CheckCharacterNameDecoding()
+        {
+            var decoder = typeof(GmService).GetMethod("DecodeCharacterName", BindingFlags.NonPublic | BindingFlags.Static);
+            var utf8Name = decoder?.Invoke(null, new object[] { new byte[] { 0xE8, 0xA7, 0x92, 0xE8, 0x89, 0xB2 } }) as string;
+            var gb18030Name = decoder?.Invoke(null, new object[] { new byte[] { 0xD6, 0xD0, 0xCE, 0xC4, 0xBD, 0xC7, 0xC9, 0xAB } }) as string;
+
+            Check("character name keeps UTF-8 Chinese", utf8Name == "角色");
+            Check("character name falls back to GB18030 Chinese", gb18030Name == "中文角色");
         }
 
         private static void CheckLevelAndExperience(GmService gm, string dbPath)
