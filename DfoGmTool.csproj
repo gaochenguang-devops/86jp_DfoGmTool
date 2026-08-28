@@ -17,6 +17,10 @@
     <Compile Remove="PvfLib\**" />
     <Content Remove="PvfLib\**" />
     <None Remove="PvfLib\**" />
+    <!-- 服务端源码仅作为对照工程，不能被 GM 工具重复编译。 -->
+    <Compile Remove="ServerS4A21-master\**" />
+    <Content Remove="ServerS4A21-master\**" />
+    <None Remove="ServerS4A21-master\**" />
   </ItemGroup>
   <ItemGroup>
     <!-- ServerCore\ 是服务端业务源码: 发物品/改等级等操作走服务端同一套业务代码, 代码随工具入库 -->

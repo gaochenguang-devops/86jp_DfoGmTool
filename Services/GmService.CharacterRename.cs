@@ -25,7 +25,7 @@ namespace DfoGmTool.Services
                     if (CharacterNameExists(conn, tx, normalized, characterId))
                         return Error("角色名已存在: " + normalized);
 
-                    var nameBytes = Encoding.UTF8.GetBytes(normalized);
+                    var nameBytes = GetClientCharacterNameBytes(normalized);
                     using (var cmd = conn.CreateCommand())
                     {
                         cmd.Transaction = tx;
@@ -69,10 +69,10 @@ WHERE character_id = @characterId
 SELECT COUNT(1)
 FROM characters
 WHERE character_id <> @excludedCharacterId
-  AND (name = @name OR name = @nameBytes OR name_bytes = @nameBytes);";
+  AND (name = @name OR name = @clientNameBytes OR name = @legacyUtf8NameBytes
+       OR name_bytes = @clientNameBytes OR name_bytes = @legacyUtf8NameBytes);";
                 cmd.Parameters.AddWithValue("@excludedCharacterId", excludedCharacterId);
-                cmd.Parameters.AddWithValue("@name", name);
-                cmd.Parameters.AddWithValue("@nameBytes", Encoding.UTF8.GetBytes(name));
+                AddCharacterNameParameters(cmd, name);
                 return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
             }
         }

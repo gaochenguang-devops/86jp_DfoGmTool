@@ -125,9 +125,9 @@ ORDER BY a.account_id;";
 SELECT COUNT(1)
 FROM characters
 WHERE delete_flag = 0
-  AND (name = @name OR name = @nameBytes OR name_bytes = @nameBytes);";
-                cmd.Parameters.AddWithValue("@name", normalized);
-                cmd.Parameters.AddWithValue("@nameBytes", Encoding.UTF8.GetBytes(normalized));
+  AND (name = @name OR name = @clientNameBytes OR name = @legacyUtf8NameBytes
+       OR name_bytes = @clientNameBytes OR name_bytes = @legacyUtf8NameBytes);";
+                AddCharacterNameParameters(cmd, normalized);
                 var exists = Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
                 return new { success = true, available = !exists, reason = exists ? "角色名已存在" : "" };
             }
@@ -315,9 +315,9 @@ SELECT last_insert_rowid();";
                     if (column.Equals("account_id", StringComparison.OrdinalIgnoreCase))
                         value = targetAccountId;
                     else if (column.Equals("name", StringComparison.OrdinalIgnoreCase))
-                        value = Encoding.UTF8.GetBytes(newName);
+                        value = GetClientCharacterNameBytes(newName);
                     else if (column.Equals("name_bytes", StringComparison.OrdinalIgnoreCase))
-                        value = Encoding.UTF8.GetBytes(newName);
+                        value = GetClientCharacterNameBytes(newName);
                     else if (column.Equals("delete_flag", StringComparison.OrdinalIgnoreCase))
                         value = 0;
                     else if (column.Equals("slot_index", StringComparison.OrdinalIgnoreCase))
@@ -846,9 +846,9 @@ WHERE character_id=@cid AND list_type=@listType;";
 SELECT COUNT(1)
 FROM characters
 WHERE delete_flag = 0
-  AND (name = @name OR name = @nameBytes OR name_bytes = @nameBytes);";
-                cmd.Parameters.AddWithValue("@name", name);
-                cmd.Parameters.AddWithValue("@nameBytes", Encoding.UTF8.GetBytes(name));
+  AND (name = @name OR name = @clientNameBytes OR name = @legacyUtf8NameBytes
+       OR name_bytes = @clientNameBytes OR name_bytes = @legacyUtf8NameBytes);";
+                AddCharacterNameParameters(cmd, name);
                 return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
             }
         }
@@ -924,10 +924,25 @@ WHERE account_id = @aid
         {
             if (string.IsNullOrWhiteSpace(name))
                 return "角色名不能为空";
-            var bytes = Encoding.UTF8.GetByteCount(name);
+            var bytes = GetClientCharacterNameBytes(name).Length;
             if (bytes < 2 || bytes > 18)
                 return "角色名长度需要为 2-18 字节";
             return null;
+        }
+
+        // A21 客户端和服务端都用 GBK(936) 传输、存储角色名。
+        private static byte[] GetClientCharacterNameBytes(string name)
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            return Encoding.GetEncoding(936).GetBytes(name ?? string.Empty);
+        }
+
+        private static void AddCharacterNameParameters(SqliteCommand command, string name)
+        {
+            command.Parameters.AddWithValue("@name", name);
+            command.Parameters.AddWithValue("@clientNameBytes", GetClientCharacterNameBytes(name));
+            // 兼容尚未迁移的旧 GM UTF-8 写入，不能让其与新名称重复。
+            command.Parameters.AddWithValue("@legacyUtf8NameBytes", Encoding.UTF8.GetBytes(name ?? string.Empty));
         }
 
         private static string ComputeMd5Hex(string text)

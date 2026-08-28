@@ -839,16 +839,10 @@ LIMIT 1;",
             if (bytes == null || bytes.Length == 0)
                 return string.Empty;
 
-            try
-            {
-                // 不能使用 Encoding.UTF8 的替换回退：旧版 GBK/GB18030 名称会被悄悄替换成 �。
-                return new System.Text.UTF8Encoding(false, true).GetString(bytes);
-            }
-            catch (System.Text.DecoderFallbackException)
-            {
-                System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
-                return System.Text.Encoding.GetEncoding("GB18030").GetString(bytes);
-            }
+            // A21 服务端将 characters.name 作为客户端 GBK(936) 字节存储。
+            // 有些 GBK 双字节碰巧也是合法 UTF-8；若先按 UTF-8 探测会产生乱码。
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            return System.Text.Encoding.GetEncoding(936).GetString(bytes);
         }
 
         // 玩家实际看到的 SP/TP: 总点数(等级表+加成) 与 剩余点数(扣除已学技能),

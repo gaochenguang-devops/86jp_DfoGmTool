@@ -167,11 +167,20 @@ namespace DfoGmTool.SelfTests
         private static void CheckCharacterNameDecoding()
         {
             var decoder = typeof(GmService).GetMethod("DecodeCharacterName", BindingFlags.NonPublic | BindingFlags.Static);
-            var utf8Name = decoder?.Invoke(null, new object[] { new byte[] { 0xE8, 0xA7, 0x92, 0xE8, 0x89, 0xB2 } }) as string;
-            var gb18030Name = decoder?.Invoke(null, new object[] { new byte[] { 0xD6, 0xD0, 0xCE, 0xC4, 0xBD, 0xC7, 0xC9, 0xAB } }) as string;
+            var encoder = typeof(GmService).GetMethod("GetClientCharacterNameBytes", BindingFlags.NonPublic | BindingFlags.Static);
+            var clientNameBytes = encoder?.Invoke(null, new object[] { "角色" }) as byte[];
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            var gbk = System.Text.Encoding.GetEncoding(936);
+            var gbkName = decoder?.Invoke(null, new object[] { new byte[] { 0xD6, 0xD0, 0xCE, 0xC4, 0xBD, 0xC7, 0xC9, 0xAB } }) as string;
+            var ambiguousGbkBytes = new byte[] { 0xC2, 0xA9 };
+            var ambiguousGbkName = decoder?.Invoke(null, new object[] { ambiguousGbkBytes }) as string;
 
-            Check("character name keeps UTF-8 Chinese", utf8Name == "角色");
-            Check("character name falls back to GB18030 Chinese", gb18030Name == "中文角色");
+            Check("character name decodes server GBK Chinese", gbkName == "中文角色");
+            Check("character name prefers GBK when bytes are also valid UTF-8",
+                ambiguousGbkName == gbk.GetString(ambiguousGbkBytes)
+                && ambiguousGbkName != System.Text.Encoding.UTF8.GetString(ambiguousGbkBytes));
+            Check("character name uses server GBK wire bytes",
+                clientNameBytes != null && clientNameBytes.SequenceEqual(new byte[] { 0xBD, 0xC7, 0xC9, 0xAB }));
         }
 
         private static void CheckLevelAndExperience(GmService gm, string dbPath)
@@ -2690,11 +2699,13 @@ VALUES(926017, 926014, 'rename-duplicate-selftest', 0, 0, 1, 0);");
             }
 
             var renamed = gm.RenameCharacter(CharacterId, newName);
-            Check("character rename updates text and byte name fields",
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            var clientNameBytes = System.Text.Encoding.GetEncoding(936).GetBytes(newName);
+            Check("character rename stores client GBK name bytes",
                 IsSuccess(renamed)
                 && GetStringProperty(renamed, "name") == newName
-                && LoadTextOrUtf8Blob(dbPath, $"SELECT name FROM characters WHERE character_id={CharacterId};") == newName
-                && LoadTextOrUtf8Blob(dbPath, $"SELECT name_bytes FROM characters WHERE character_id={CharacterId};") == newName);
+                && LoadBlob(dbPath, $"SELECT name FROM characters WHERE character_id={CharacterId};").SequenceEqual(clientNameBytes)
+                && LoadBlob(dbPath, $"SELECT name_bytes FROM characters WHERE character_id={CharacterId};").SequenceEqual(clientNameBytes));
 
             var duplicate = gm.RenameCharacter(926017, newName);
             Check("character rename rejects an active duplicate name",
@@ -3057,7 +3068,7 @@ INSERT INTO character_skills(character_id, page_index, slot, skill_id, level) VA
             }
         }
 
-        private static string LoadTextOrUtf8Blob(string dbPath, string sql)
+        private static byte[] LoadBlob(string dbPath, string sql)
         {
             using (var conn = Open(dbPath))
             using (var cmd = conn.CreateCommand())
@@ -3065,10 +3076,10 @@ INSERT INTO character_skills(character_id, page_index, slot, skill_id, level) VA
                 cmd.CommandText = sql;
                 var value = cmd.ExecuteScalar();
                 if (value is byte[] bytes)
-                    return System.Text.Encoding.UTF8.GetString(bytes);
+                    return bytes;
                 return value == null || value == DBNull.Value
                     ? null
-                    : Convert.ToString(value);
+                    : System.Text.Encoding.UTF8.GetBytes(Convert.ToString(value));
             }
         }
 
