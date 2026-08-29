@@ -161,7 +161,7 @@ function renderAccountPanel(accountId, detail) {
   ];
   for (const cube of cubeRows) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${cube.resourceLabel}</td><td>${cube.itemId}</td><td>${escapeHtml(cube.name || '')}</td>
+    tr.innerHTML = `<td>${cube.resourceLabel}</td><td>${cube.itemId}</td><td>${itemPreviewName(cube.itemId, cube.name, cube.rarity)}</td>
       <td>${Number(cube.count).toLocaleString()}</td>
       <td><input type="number" min="0" class="val-input" value="${cube.count}"></td><td><button class="mini">覆写</button></td>`;
     tr.querySelector('button').onclick = async () => {
@@ -183,7 +183,7 @@ function renderAccountPanel(accountId, detail) {
   for (const item of detail.cargo) {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${item.slot}</td><td>${item.templateId}</td>
-      <td>${escapeHtml(item.name || '')}</td><td>${item.count}</td><td>${item.durability}</td>
+      <td>${itemPreviewName(item.templateId, item.name, item.rarity)}</td><td>${item.count}</td><td>${item.durability}</td>
       <td><button class="mini danger">删除</button></td>`;
     tr.querySelector('button').onclick = async () => {
       try {
@@ -423,7 +423,10 @@ async function selectCharacter(id, li) {
     loadGoldLimit();
     loadSpTp();
     loadGrowOptions();
+    loadExpertJob();
     loadItems();
+    if ($('#tab-mail').classList.contains('hidden')) resetMailboxPanel();
+    else loadMailbox();
     loadQuests();
     loadAllVisibleQuests();
     loadMainQuests();

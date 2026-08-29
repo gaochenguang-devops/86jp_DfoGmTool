@@ -504,6 +504,103 @@ async function setGrowType() {
   }
 }
 
+// ---- 副职业 ----
+
+let expertJobState = null;
+// 等级和经验是两条互斥的写入路径, 以最后被编辑的那个输入框为准。
+let expertJobLastEdited = 'level';
+
+async function loadExpertJob() {
+  if (!currentChar) return;
+  const epoch = selectEpoch;
+  try {
+    const data = await api(`/api/characters/${currentChar.characterId}/expertjob`);
+    if (epoch !== selectEpoch) return;
+    renderExpertJob(data);
+  } catch (e) {
+    $('#expert-job-now').textContent = e.message;
+    toast(e.message, true);
+  }
+}
+
+function renderExpertJob(data) {
+  expertJobState = data;
+  expertJobLastEdited = 'level';
+  const typeSel = $('#expert-job-type');
+  typeSel.innerHTML = (data.options || [])
+    .map((option) => `<option value="${option.type}">${escapeHtml(option.name)}</option>`)
+    .join('');
+  typeSel.value = String(data.type);
+  applyExpertJobOption(data.type);
+}
+
+// 切换下拉时把等级/经验上限换成目标副职业的; 选回当前副职业则回填现有进度。
+function applyExpertJobOption(type) {
+  const option = (expertJobState?.options || []).find((item) => item.type === type);
+  if (!option) return;
+  const same = expertJobState && expertJobState.type === type;
+  const hasJob = type > 0;
+  const levelInput = $('#expert-job-level');
+  const expInput = $('#expert-job-exp');
+  levelInput.max = option.maxLevel > 0 ? option.maxLevel : 1;
+  levelInput.value = same && expertJobState.level > 0 ? expertJobState.level : 1;
+  expInput.max = option.maxExp > 0 ? option.maxExp : 0;
+  expInput.value = same ? expertJobState.exp : 0;
+  levelInput.disabled = !hasJob;
+  expInput.disabled = !hasJob;
+  $('#btn-expert-job-max').disabled = !hasJob;
+  $('#expert-job-now').textContent = describeExpertJob(expertJobState, type);
+}
+
+function describeExpertJob(data, selectedType) {
+  if (!data) return '';
+  const hasJob = data.type > 0;
+  const parts = [
+    hasJob ? `当前 ${escapeHtml(data.typeName)} Lv.${data.level} / ${data.maxLevel}` : '当前没有副职业',
+    hasJob ? `经验 ${Number(data.exp).toLocaleString()} / ${Number(data.maxExp).toLocaleString()}` : '',
+    hasJob ? `已学配方 ${data.learnedRecipeCount}` : '',
+    hasJob && data.maxMachineGrade > 0
+      ? `设备 ${data.machineGrade}/${data.maxMachineGrade} 耐久 ${data.machineEndurance}`
+      : '',
+    selectedType !== data.type ? '覆写后会清空旧副职业的配方与送技' : '',
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+async function setExpertJob() {
+  if (!currentChar) return;
+  const type = parseInt($('#expert-job-type').value, 10) || 0;
+  const payload = { type };
+  if (type > 0) {
+    const level = parseInt($('#expert-job-level').value, 10);
+    const exp = parseInt($('#expert-job-exp').value, 10);
+    if (expertJobLastEdited === 'exp' && Number.isSafeInteger(exp) && exp >= 0) payload.exp = exp;
+    else if (Number.isSafeInteger(level) && level > 0) payload.level = level;
+    else if (Number.isSafeInteger(exp) && exp >= 0) payload.exp = exp;
+  }
+  try {
+    const data = await post(`/api/characters/${currentChar.characterId}/expertjob`, payload);
+    renderExpertJob(data);
+    toast(type > 0 ? `${data.typeName} 已覆写为 Lv.${data.level}` : '副职业已清除');
+    loadSpTp();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function maxExpertJob() {
+  if (!currentChar) return;
+  const type = parseInt($('#expert-job-type').value, 10) || 0;
+  try {
+    const data = await post(`/api/characters/${currentChar.characterId}/expertjob/max`, { type });
+    renderExpertJob(data);
+    toast(`${data.typeName} 已一键满级`);
+    loadSpTp();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 let inventoryLimitIs999 = false;
 let goldLimitStatus = null;
 

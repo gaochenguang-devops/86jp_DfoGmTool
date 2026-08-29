@@ -23,6 +23,7 @@ namespace DfoGmTool.Services
         private readonly SupplementalItemExpirationService _supplementalItemExpiration;
         private readonly AccountProgressService _accountProgress;
         private readonly GmSystemMailService _systemMail;
+        private readonly ExpertJobProgressService _expertJob;
 
         internal static void ResetPvfStaticData()
         {
@@ -39,6 +40,7 @@ namespace DfoGmTool.Services
             _supplementalItemExpiration = new SupplementalItemExpirationService(config.ConnectionString);
             _accountProgress = new AccountProgressService(config.DatabasePath, config.SchemaPath, config.PvfPath);
             _systemMail = new GmSystemMailService(config.ConnectionString, _inventory);
+            _expertJob = new ExpertJobProgressService(config.ConnectionString, config.PvfPath);
         }
 
         // 最终职业名(觉醒>转职>基础), 以当前 PVF 职业目录为准。

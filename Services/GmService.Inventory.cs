@@ -220,7 +220,8 @@ namespace DfoGmTool.Services
             ItemGrantOptions options,
             PvfIndexService pvfIndex,
             string requestId = null,
-            string deliveryMode = null)
+            string deliveryMode = null,
+            bool sendSet = false)
         {
             if (itemTemplateId <= 0)
                 return Error("itemTemplateId 无效");
@@ -236,6 +237,20 @@ namespace DfoGmTool.Services
                 return Error("角色不存在: " + characterId);
 
             var name = pvfIndex.ResolveItemName(itemTemplateId);
+            // 整套发放必须在所有特殊资产分支之前拦下来: 后面那些分支只认单件语义,
+            // 让它们接手会把 sendSet 静默忽略掉。
+            if (sendSet)
+                return GiveItemSetViaMail(
+                    characterId,
+                    accountId,
+                    itemTemplateId,
+                    count,
+                    name,
+                    options,
+                    pvfIndex,
+                    requestId,
+                    deliveryMode);
+
             // A21 原生史诗碎片不属于普通 ItemCore/邮件物品，必须更新账号图鉴 blob。
             if (ItemMetadataResolver.IsEpicPieceItem(itemTemplateId))
             {
@@ -539,6 +554,79 @@ VALUES ('account', @aid, @cid, @aid, 'gm_grant',
                 notification = "mailbox_reopen_required",
                 requiresReselect = false,
                 deliveryHint = "在线角色请打开邮箱；如果邮箱已经打开，请关闭后重新打开，无需重新选择角色。",
+            };
+        }
+
+        // 整套发放只走邮件: 每个部件 1 件, 由 PvfIndexService 按 part set index 对齐成员,
+        // 再交给系统邮件服务分片(每封 10 件, 最多两封)。
+        private object GiveItemSetViaMail(
+            int characterId,
+            int accountId,
+            int itemTemplateId,
+            int count,
+            string seedName,
+            ItemGrantOptions options,
+            PvfIndexService pvfIndex,
+            string requestId,
+            string deliveryMode)
+        {
+            if (NormalizeDeliveryMode(deliveryMode) == "inventory")
+                return Error("整套发放只支持邮件，请把发放方式改为邮件");
+            if (count != 1)
+                return Error("整套发放每个部件固定发 1 件，请把数量改为 1");
+
+            if (!TryLoadGrantCharacter(characterId, out var job, out _, out _))
+                return Error("角色不存在: " + characterId);
+
+            if (!pvfIndex.TryResolveSendableSet(
+                    itemTemplateId,
+                    job,
+                    out var memberIds,
+                    out var setName,
+                    out var setError))
+            {
+                return Error(setError ?? "无法解析套装成员");
+            }
+
+            var displayName = string.IsNullOrWhiteSpace(setName) ? seedName : setName;
+            var grant = _systemMail.SendItemSetGrant(
+                characterId,
+                accountId,
+                memberIds,
+                options,
+                requestId,
+                displayName,
+                pvfIndex.ResolveItemName);
+            if (!grant.Success)
+                return Error(grant.Error ?? "套装邮件发放失败");
+
+            var adjustedItems = grant.AdjustedItemIds
+                .Select(id => (object)new { itemId = id, name = pvfIndex.ResolveItemName(id) })
+                .ToArray();
+            return new
+            {
+                success = true,
+                characterId,
+                accountId,
+                itemTemplateId,
+                name = displayName,
+                setName,
+                sendSet = true,
+                count = grant.AttachmentCount,
+                itemCount = grant.AttachmentCount,
+                itemIds = memberIds,
+                adjustedItems,
+                delivery = "mail_set",
+                messageId = grant.MessageId,
+                messageIds = grant.MessageIds,
+                messageCount = grant.MessageCount,
+                attachmentCount = grant.AttachmentCount,
+                replayed = grant.Replayed,
+                notification = "mailbox_reopen_required",
+                requiresReselect = false,
+                deliveryHint = adjustedItems.Length > 0
+                    ? "整套已发到邮箱；部分部件不支持所选配置，已按该部件能力发放。请打开邮箱领取，已打开的请关闭后重新打开。"
+                    : "整套已发到邮箱；在线角色请打开邮箱，如果邮箱已经打开，请关闭后重新打开，无需重新选择角色。",
             };
         }
 

@@ -18,6 +18,7 @@ namespace DfoGmTool
             "remote_password",
             "database_path",
             "pvf_path",
+            "imagepacks_path",
         };
 
         private readonly List<string> _validationErrors = new List<string>();
@@ -29,6 +30,8 @@ namespace DfoGmTool
         public string RemotePassword { get; private set; }
         public string DatabasePath { get; private set; }
         public string PvfPath { get; private set; }
+        // 图标目录是可选项: 缺失或无效只让物品预览退化成纯文字, 不参与远程模式的必填校验
+        public string ImagePacksPath { get; private set; }
 
         public string ListenUrl => AllowRemoteAccess
             ? "http://0.0.0.0:" + ListenPort
@@ -102,9 +105,11 @@ namespace DfoGmTool
             values.TryGetValue("remote_password", out var password);
             values.TryGetValue("database_path", out var databasePath);
             values.TryGetValue("pvf_path", out var pvfPath);
+            values.TryGetValue("imagepacks_path", out var imagePacksPath);
             RemotePassword = password?.Trim();
             DatabasePath = databasePath?.Trim();
             PvfPath = pvfPath?.Trim();
+            ImagePacksPath = imagePacksPath?.Trim();
         }
 
         private List<string> ValidateRemoteSettings()

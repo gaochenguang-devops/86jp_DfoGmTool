@@ -32,6 +32,19 @@ namespace DfoGmTool.Services
             public bool RequiresManualGrantType;
             public bool RequiresConfiguration;
             public bool SupportsQuality;
+
+            // ---- 以下为图标/悬停预览/套装用字段, 只影响展示, 不参与发放校验 ----
+            public string IconPath;      // [icon] 路径, 无则没有图标
+            public int IconFrame;
+            public string IconMarkPath;  // [icon mark] 叠加层
+            public int IconMarkFrame;
+            public string Explain;
+            public string BasicExplain;
+            public string DetailExplain;
+            public string FlavorText;
+            public List<string> Stats;
+            public int PartSetIndex;     // [part set index], 0 表示不属于套装
+            public int LinkedCardId;     // 宝珠 [monster card id], 0 表示没有对应卡片
         }
 
         public readonly struct ItemExpirationDefinition
@@ -246,6 +259,10 @@ namespace DfoGmTool.Services
                     requiresManualGrantType = e.RequiresManualGrantType,
                     requiresConfiguration = e.RequiresConfiguration,
                     supportsQuality = e.SupportsQuality,
+                    setId = e.PartSetIndex > 0 ? e.PartSetIndex : 0,
+                    setName = ResolveSetName(e.PartSetIndex),
+                    // 这里不带职业: 列表是给"能不能整套发"打标记, 具体职业过滤在发放时再做
+                    setSendable = IsSetSendable(e, SetAnyJob),
                     templateExpiration = new
                     {
                         known = true,
@@ -515,6 +532,7 @@ namespace DfoGmTool.Services
                             HasInvalidExpirationDefinition = expiration.HasInvalidDefinition,
                             RequiresManualGrantType = requiresManual,
                             SupportsQuality = supportsQuality,
+                            PartSetIndex = model.PartSetIndex > 0 ? model.PartSetIndex : 0,
                             RequiresConfiguration = !isPetCreature
                                 && (requiresManual
                                     || (isAvatar && (hasAvatarOption || hasAvatarDuration || configurableExpiration))
@@ -522,6 +540,7 @@ namespace DfoGmTool.Services
                                     || (!isAvatar && !isPetArtifact
                                         && (configurableExpiration || capability.CanUpgrade || capability.CanAmplify || capability.CanForge))),
                         };
+                        FillPreview(results[i], model, text);
                     }
                     else
                     {
@@ -554,6 +573,7 @@ namespace DfoGmTool.Services
                                 || expiration.AbsoluteExpirationUnixTime > 0
                                 || expiration.UsablePeriodDays > 0,
                         };
+                        FillPreview(results[i], model, text);
                     }
                 }
                 catch

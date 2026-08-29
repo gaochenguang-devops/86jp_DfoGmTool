@@ -3,6 +3,7 @@
 // 新增绑定一律放这里, 不要散落到各功能文件。
 
 if (window.DfoTheme) window.DfoTheme.bind();
+initItemPreview();
 bindRuntimeEnvironment();
 bindGivePageSize();
 bindInventoryPageSize();
@@ -16,6 +17,7 @@ document.querySelectorAll('.tab[data-tab]').forEach((tab) => {
     document.querySelectorAll('.tab-page').forEach((p) => p.classList.add('hidden'));
     tab.classList.add('active');
     $('#tab-' + tab.dataset.tab).classList.remove('hidden');
+    if (tab.dataset.tab === 'mail') loadMailbox();
   };
 });
 
@@ -37,6 +39,7 @@ for (const sel of ['#give-minlv', '#give-maxlv']) {
   $(sel).addEventListener('keydown', (e) => { if (e.key === 'Enter') searchItems(0); });
 }
 $('#btn-refresh-items').onclick = loadItems;
+$('#btn-refresh-mail').onclick = loadMailbox;
 $('#btn-clear-category').onclick = clearCurrentCategory;
 $('#inventory-expiration').onchange = () => { invPage = 0; renderItemTable(); };
 $('#btn-account-panel').onclick = showAccountPanel;
@@ -71,6 +74,12 @@ $('#btn-gold-limit-max').onclick = setMaximumGoldLimit;
 $('#grow-job').onchange = loadGrowOptionsForJob;
 $('#grow-first').onchange = renderSecondOptions;
 $('#btn-grow').onclick = setGrowType;
+$('#expert-job-type').onchange = () =>
+  applyExpertJobOption(parseInt($('#expert-job-type').value, 10) || 0);
+$('#expert-job-level').oninput = () => { expertJobLastEdited = 'level'; };
+$('#expert-job-exp').oninput = () => { expertJobLastEdited = 'exp'; };
+$('#btn-expert-job').onclick = setExpertJob;
+$('#btn-expert-job-max').onclick = maxExpertJob;
 
 document.querySelectorAll('.quest-tab').forEach((tab) => {
   tab.onclick = () => {

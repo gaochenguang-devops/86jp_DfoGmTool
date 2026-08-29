@@ -209,6 +209,10 @@ WHERE character_id = @cid;";
             if (skillSyncMode == GrowSkillSyncMode.Rebuild)
             {
                 var snapshot = CharacterSkillProfile.BuildSnapshot(job, first, second, level);
+                // 整页重建会丢掉副职业送技, 这里按当前副职业补回来。
+                var expertGrants = _expertJob.LoadActiveSkillGrants(conn, tx, characterId);
+                if (expertGrants.Count > 0)
+                    CharacterSkillProfile.MergeGrants(snapshot, expertGrants, job, level);
                 var points = SkillStateService.ResolvePointState(snapshot, job, level, bonusSp, bonusTp, first, second);
                 SkillStateService.ApplyProtocolMirrors(snapshot, points);
                 repository.SaveSkillProgress(conn, tx, characterId, snapshot, points);

@@ -59,7 +59,7 @@ namespace DfoGmTool
                 return;
             }
 
-            var runtime = new GmRuntimeEnvironment(initialConfig);
+            var runtime = new GmRuntimeEnvironment(initialConfig, hostConfig.ImagePacksPath);
             var initialStatus = runtime.GetStatus();
             if (hostConfig.AllowRemoteAccess && !initialStatus.Configured)
             {
@@ -89,6 +89,8 @@ namespace DfoGmTool
                     loading = status.Loading,
                     database = status.Database,
                     pvf = status.Pvf,
+                    imagePacks = status.ImagePacks,
+                    hasImagePacks = status.HasImagePacks,
                     serverBin = status.ServerBin,
                     indexReady = status.IndexReady,
                     indexError = status.IndexError,
@@ -175,8 +177,13 @@ namespace DfoGmTool
             });
             app.MapPost("/api/environment", (RuntimeEnvironmentRequest body) =>
                 Results.Json(hostConfig.AllowRemoteAccess
-                    ? new { success = false, error = "远程访问模式下请在 config.ini 修改数据库和 PVF 路径。" }
-                    : runtime.Configure(body.DatabasePath, body.PvfPath)));
+                    ? new { success = false, error = "远程访问模式下请在 config.ini 修改数据库、PVF 和 ImagePacks2 路径。" }
+                    : runtime.Configure(body.DatabasePath, body.PvfPath, body.ImagePacksPath)));
+            // 本机文件选择框: 与 /api/environment 一样只在本机模式开放
+            app.MapPost("/api/environment/browse", (BrowsePathRequest body) =>
+                Results.Json(hostConfig.AllowRemoteAccess
+                    ? new { success = false, error = "远程访问模式下无法打开本机文件框。" }
+                    : NativePathDialog.Pick(body)));
 
             app.MapPost("/api/migrations/a12-to-a21/preview", (A12ToA21MigrationRequest body) =>
             {
@@ -227,6 +234,10 @@ namespace DfoGmTool
             app.MapGet("/api/characters", (int? accountId) => WithRuntime((gm, _) => gm.ListCharacters(accountId ?? -1)));
             app.MapGet("/api/characters/{id:int}", (int id) => WithRuntime((gm, _) => gm.GetCharacter(id)));
             app.MapGet("/api/characters/{id:int}/items", (int id) => WithRuntime((gm, pvfIndex) => gm.ListItems(id, pvfIndex)));
+            app.MapGet("/api/characters/{id:int}/mailbox", (int id) =>
+                WithRuntime((gm, pvfIndex) => gm.ListMailbox(id, pvfIndex)));
+            app.MapPost("/api/characters/{id:int}/mailbox/delete", (int id, MailboxDeleteRequest body) =>
+                WithRuntime((gm, _) => gm.DeleteMailboxMessage(id, body?.MessageId ?? 0)));
             app.MapPost("/api/characters/{id:int}/mailbox/clear", (int id) =>
                 WithRuntime((gm, _) => gm.ClearCharacterMailbox(id)));
             app.MapGet("/api/inventory-anomalies/status", () =>
@@ -254,7 +265,8 @@ namespace DfoGmTool
                     body.Options,
                     pvfIndex,
                     body.RequestId,
-                    body.DeliveryMode)));
+                    body.DeliveryMode,
+                    body.SendSet)));
             app.MapPost("/api/characters/{id:int}/items/remove", (int id, ItemRequest body) =>
                 WithRuntime((gm, _) => gm.RemoveItem(id, body.TemplateId, body.Count)));
             app.MapPost("/api/characters/{id:int}/items/delete-at", (int id, DeleteAtRequest body) =>
@@ -292,6 +304,12 @@ namespace DfoGmTool
             app.MapGet("/api/characters/{id:int}/growoptions", (int id, int? job) => WithRuntime((gm, _) => gm.GetGrowOptions(id, job)));
             app.MapPost("/api/characters/{id:int}/growtype", (int id, GrowTypeRequest body) =>
                 WithRuntime((gm, _) => gm.SetGrowTypeFixed(id, body.Job, body.First, body.Second)));
+            app.MapGet("/api/characters/{id:int}/expertjob", (int id) =>
+                WithRuntime((gm, _) => gm.GetExpertJob(id)));
+            app.MapPost("/api/characters/{id:int}/expertjob", (int id, ExpertJobRequest body) =>
+                WithRuntime((gm, _) => gm.SetExpertJob(id, body?.Type ?? 0, body?.Level, body?.Exp)));
+            app.MapPost("/api/characters/{id:int}/expertjob/max", (int id, ExpertJobRequest body) =>
+                WithRuntime((gm, _) => gm.MaxExpertJob(id, body?.Type)));
             app.MapPost("/api/characters/{id:int}/quests/{questId:int}/ready", (int id, int questId, string activationId) =>
                 WithRuntime((gm, _) => gm.MarkQuestReady(id, questId, activationId)));
             app.MapPost("/api/characters/{id:int}/quests/{questId:int}/daily-ready", (int id, int questId) =>
@@ -342,6 +360,12 @@ namespace DfoGmTool
             app.MapGet("/api/items/categories", () => WithRuntime((_, pvfIndex) => pvfIndex.GetItemCategories()));
             app.MapGet("/api/items/browse", (string q, string kind, string tag, string segment, string special, int? minLevel, int? maxLevel, int? rarity, int? limit, int? offset, int? usableJob, string expiration = null) =>
                 WithRuntime((_, pvfIndex) => pvfIndex.SearchItems(q, kind, tag, segment, special, minLevel ?? 0, maxLevel ?? 0, rarity ?? -1, limit ?? 100, offset ?? 0, expiration, usableJob ?? -1)));
+            app.MapGet("/api/items/{id:int}/preview", (int id) =>
+                WithRuntime((_, pvfIndex) => pvfIndex.GetItemPreview(id)));
+            app.MapGet("/api/items/{id:int}/icon", (int id, HttpContext context) =>
+                WritePng(context, runtime.TryGetItemIcon(id)));
+            app.MapGet("/api/preview/chrome/window", (HttpContext context) =>
+                WritePng(context, runtime.TryGetWindowChrome()));
 
             Console.WriteLine("GM Tool 监听: " + hostConfig.ListenUrl);
             Console.WriteLine("配置文件: " + hostConfig.ConfigPath);
@@ -358,6 +382,21 @@ namespace DfoGmTool
             {
                 ReportStartupFailure("无法监听 " + hostConfig.ListenUrl + ":\r\n" + ex.GetBaseException().Message);
             }
+        }
+
+        // 图标是可选资源: 有图返回 PNG 并允许浏览器缓存一天; 没图返回 204 让前端静默降级;
+        // 只有数据源没就绪才回 JSON 错误。
+        private static IResult WritePng(HttpContext context, ItemIconResult icon)
+        {
+            if (icon.Png != null)
+            {
+                context.Response.Headers.CacheControl = "private, max-age=86400";
+                return Results.File(icon.Png, "image/png");
+            }
+            if (!string.IsNullOrWhiteSpace(icon.Error))
+                return Results.Json(new { success = false, error = icon.Error });
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.NoContent();
         }
 
         private static void ReportStartupFailure(string error)
@@ -405,6 +444,8 @@ namespace DfoGmTool
         public ServerCore.Game.Inventory.ItemGrantOptions Options { get; set; }
         public string RequestId { get; set; }
         public string DeliveryMode { get; set; }
+        // true 时按套装整套发放(只支持邮件), TemplateId 当作套装内任一部件
+        public bool SendSet { get; set; }
     }
 
     public sealed class AmountRequest
@@ -434,6 +475,7 @@ namespace DfoGmTool
     {
         public string DatabasePath { get; set; }
         public string PvfPath { get; set; }
+        public string ImagePacksPath { get; set; }
     }
 
     public sealed class LoginRequest
@@ -502,6 +544,18 @@ namespace DfoGmTool
         public int? Job { get; set; }
         public int First { get; set; }
         public int Second { get; set; }
+    }
+
+    public sealed class ExpertJobRequest
+    {
+        public int Type { get; set; }
+        public int? Level { get; set; }
+        public long? Exp { get; set; }
+    }
+
+    public sealed class MailboxDeleteRequest
+    {
+        public long MessageId { get; set; }
     }
 
     public sealed class ProfessionQuestRequest

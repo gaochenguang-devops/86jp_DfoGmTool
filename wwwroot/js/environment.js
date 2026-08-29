@@ -17,15 +17,18 @@ function readStoredRuntimeSource() {
 
     const databasePath = value.databasePath.trim();
     const pvfPath = value.pvfPath.trim();
-    return databasePath && pvfPath ? { databasePath, pvfPath } : null;
+    // 图标目录是可选项, 老记录里没有这个字段
+    const imagePacksPath = typeof value.imagePacksPath === 'string' ? value.imagePacksPath.trim() : '';
+    return databasePath && pvfPath ? { databasePath, pvfPath, imagePacksPath } : null;
   } catch (_) {
     return null;
   }
 }
 
-function saveRuntimeSource(databasePath, pvfPath) {
+function saveRuntimeSource(databasePath, pvfPath, imagePacksPath) {
   try {
-    localStorage.setItem(RUNTIME_SOURCE_STORAGE_KEY, JSON.stringify({ databasePath, pvfPath }));
+    localStorage.setItem(RUNTIME_SOURCE_STORAGE_KEY,
+      JSON.stringify({ databasePath, pvfPath, imagePacksPath: imagePacksPath || '' }));
   } catch (_) {
     // Source selection still works when browser storage is unavailable.
   }
@@ -58,6 +61,7 @@ function updateRuntimeActionButtons(status) {
 function updateRuntimeSourceInputs(status, force) {
   const database = $('#runtime-database-path');
   const pvf = $('#runtime-pvf-path');
+  const imagePacks = $('#runtime-imagepacks-path');
   const stored = readStoredRuntimeSource();
   const databasePath = String(status && status.database || '').trim()
     || (stored && stored.databasePath)
@@ -65,8 +69,12 @@ function updateRuntimeSourceInputs(status, force) {
   const pvfPath = String(status && status.pvf || '').trim()
     || (stored && stored.pvfPath)
     || pvf.value;
+  const imagePacksPath = String(status && status.imagePacks || '').trim()
+    || (stored && stored.imagePacksPath)
+    || (imagePacks ? imagePacks.value : '');
   if (databasePath) database.value = databasePath;
   if (pvfPath) pvf.value = pvfPath;
+  if (imagePacks && imagePacksPath) imagePacks.value = imagePacksPath;
 }
 
 function showLoginPanel() {
@@ -203,28 +211,39 @@ async function configureRuntimeEnvironment() {
 
   const databasePath = $('#runtime-database-path').value.trim();
   const pvfPath = $('#runtime-pvf-path').value.trim();
+  const imagePacksPath = ($('#runtime-imagepacks-path')?.value || '').trim();
   if (!databasePath || !pvfPath) {
     setRuntimeSourceState('请填写数据库和 PVF 路径', true);
     return;
   }
 
-  saveRuntimeSource(databasePath, pvfPath);
+  saveRuntimeSource(databasePath, pvfPath, imagePacksPath);
   setRuntimeSourceState('正在加载…', false);
   runtimeConfiguring = true;
   $('#btn-load-runtime-source').disabled = true;
   $('#btn-close-runtime-source').classList.add('hidden');
   try {
-    const result = await post('/api/environment', { databasePath, pvfPath });
+    const result = await post('/api/environment', { databasePath, pvfPath, imagePacksPath });
     const classified = Boolean(result.migrationRequired || result.databaseUnusable);
-    runtimeReady = false;
-    runtimeSourceEpoch++;
-    resetRuntimeWorkspace();
+    // 只改图标目录时后端不会重建索引(sourceChanged=false), 工作区保持原样, 原地补图即可
+    const sourceChanged = result.sourceChanged !== false || classified;
+    if (sourceChanged) {
+      runtimeReady = false;
+      runtimeSourceEpoch++;
+      resetRuntimeWorkspace();
+    }
     applyRuntimeStatus({
       ...result.status,
       authenticationRequired: false,
       authenticated: true,
       canChangeSource: true,
     });
+    if (!sourceChanged && result.imagePacksChanged) {
+      if (typeof refreshItemIcons === 'function') refreshItemIcons();
+      setRuntimeSourceState(result.status && result.status.hasImagePacks
+        ? '图标目录已更新'
+        : '未启用图标：ImagePacks2 路径为空或无效，物品只显示文字', false);
+    }
     if (result.migrationRequired) {
       if (typeof showA12A21MigrationRequired === 'function')
         showA12A21MigrationRequired(result.preview);
@@ -245,6 +264,26 @@ async function configureRuntimeEnvironment() {
     runtimeConfiguring = false;
     $('#btn-load-runtime-source').disabled = false;
     if (runtimeReady) $('#btn-close-runtime-source').classList.remove('hidden');
+  }
+}
+
+// 浏览器拿不到真实磁盘路径, 由后端弹本机选择框回填(仅本机模式, 非 Windows 会返回提示)
+async function browseRuntimePath(kind, inputId) {
+  if (runtimeConfiguring || !canChangeRuntimeSource()) return;
+
+  const input = $(inputId);
+  if (!input) return;
+  try {
+    setRuntimeSourceState('正在打开系统选择框…', false);
+    const result = await post('/api/environment/browse', { kind, currentPath: input.value.trim() });
+    if (result.cancelled || !result.path) {
+      setRuntimeSourceState('', false);
+      return;
+    }
+    input.value = result.path;
+    setRuntimeSourceState('', false);
+  } catch (e) {
+    setRuntimeSourceState(e.message, true);
   }
 }
 
@@ -290,6 +329,13 @@ async function logoutRuntime() {
 function bindRuntimeEnvironment() {
   $('#btn-runtime-source').onclick = () => showRuntimeSourcePanel(true);
   $('#btn-logout').onclick = logoutRuntime;
+  $('#btn-browse-database').onclick = () => browseRuntimePath('database', '#runtime-database-path');
+  $('#btn-browse-pvf').onclick = () => browseRuntimePath('pvf', '#runtime-pvf-path');
+  $('#btn-browse-imagepacks').onclick = () => browseRuntimePath('imagepacks', '#runtime-imagepacks-path');
+  $('#btn-clear-imagepacks').onclick = () => {
+    $('#runtime-imagepacks-path').value = '';
+    setRuntimeSourceState('', false);
+  };
   $('#btn-close-runtime-source').onclick = () => {
     if (runtimeReady && !runtimeConfiguring) hideRuntimeSourcePanel();
   };
@@ -312,5 +358,7 @@ async function initializeRuntimeEnvironment() {
 
   $('#runtime-database-path').value = source.databasePath;
   $('#runtime-pvf-path').value = source.pvfPath;
+  const imagePacks = $('#runtime-imagepacks-path');
+  if (imagePacks && source.imagePacksPath) imagePacks.value = source.imagePacksPath;
   return configureRuntimeEnvironment();
 }

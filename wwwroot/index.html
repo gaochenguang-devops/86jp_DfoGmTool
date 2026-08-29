@@ -65,10 +65,23 @@
         <button id="btn-close-runtime-source" class="mini" type="button">关闭</button>
       </div>
       <label class="runtime-source-field">数据库
-        <input id="runtime-database-path" type="text" autocomplete="off" spellcheck="false" placeholder="inventory.db 完整路径">
+        <div class="runtime-source-path">
+          <input id="runtime-database-path" type="text" autocomplete="off" spellcheck="false" placeholder="inventory.db 完整路径">
+          <button id="btn-browse-database" class="mini" type="button">浏览…</button>
+        </div>
       </label>
         <label class="runtime-source-field">PVF（当前 A21 PVF，迁移使用此路径）
-        <input id="runtime-pvf-path" type="text" autocomplete="off" spellcheck="false" placeholder="Script.pvf 完整路径">
+        <div class="runtime-source-path">
+          <input id="runtime-pvf-path" type="text" autocomplete="off" spellcheck="false" placeholder="Script.pvf 完整路径">
+          <button id="btn-browse-pvf" class="mini" type="button">浏览…</button>
+        </div>
+      </label>
+        <label class="runtime-source-field">ImagePacks2（可选，物品图标与悬浮预览）
+        <div class="runtime-source-path">
+          <input id="runtime-imagepacks-path" type="text" autocomplete="off" spellcheck="false" placeholder="ImagePacks2 目录完整路径，留空则只显示文字">
+          <button id="btn-browse-imagepacks" class="mini" type="button">浏览…</button>
+          <button id="btn-clear-imagepacks" class="mini" type="button">清除</button>
+        </div>
       </label>
         <div class="runtime-source-actions">
           <button id="btn-load-runtime-source" type="submit">加载</button>
@@ -215,6 +228,7 @@
       <nav class="tabs">
         <button class="tab active" data-tab="give">发放物品</button>
         <button class="tab" data-tab="inventory">背包</button>
+        <button class="tab" data-tab="mail">邮箱</button>
         <button class="tab" data-tab="character">角色属性</button>
         <button class="tab" data-tab="quests">任务</button>
       </nav>
@@ -299,6 +313,34 @@
         </div>
       </div>
 
+      <div id="tab-mail" class="tab-page hidden">
+        <div class="card">
+          <div class="card-title">邮箱
+            <span id="mail-count" class="hint"></span>
+            <button id="btn-refresh-mail" class="mini" type="button">刷新</button>
+            <button id="btn-clear-mail" class="mini danger" type="button" disabled>清空邮箱</button>
+          </div>
+          <div class="row">
+            <span class="hint">列出该角色收件箱与保管箱的全部邮件(含已过期)，不做过期清理。删除与清空都是物理删除：未领取的附件与金币直接消失，不会退回背包。共享邮件还有其它收件人时只摘掉本角色。在线角色需返回选角再进入才生效</span>
+          </div>
+          <table id="mail-table">
+            <thead>
+              <tr>
+                <th>邮件 ID</th>
+                <th>发件人</th>
+                <th>标题</th>
+                <th>金币</th>
+                <th>附件</th>
+                <th>状态</th>
+                <th>期限</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
       <div id="tab-character" class="tab-page hidden">
         <nav class="tabs">
           <button class="char-tab tab active" data-char-tab="level">等级与经验</button>
@@ -342,6 +384,18 @@
               <button id="btn-grow">覆写</button>
               <span class="hint">改完按服务端同一套算法重算战斗属性；GM 完成转职/觉醒任务时也会自动应用</span>
             </div>
+          </div>
+          <div class="card">
+            <div class="card-title">副职业</div>
+            <div class="row">
+              <select id="expert-job-type"></select>
+              <label>等级 <input id="expert-job-level" type="number" min="1" style="width:70px"></label>
+              <label>经验 <input id="expert-job-exp" type="number" min="0" style="width:120px"></label>
+              <button id="btn-expert-job">覆写</button>
+              <button id="btn-expert-job-max">一键满级</button>
+            </div>
+            <div class="row"><span id="expert-job-now" class="hint">加载中…</span></div>
+            <div class="row"><span class="hint">类型/经验写 character_subtype0_fields；等级与经验阈值、自动学习配方、送技全部取自当前 PVF 的 .exj。换副职业会摘掉旧职业送的技能并重算 SP/TP。在线角色需返回选角再进入才生效</span></div>
           </div>
           <div class="character-card-grid character-card-grid-two">
           <div class="card character-action-card">
@@ -581,10 +635,12 @@
   <script src="js/item-page-size.js"></script>
   <script src="js/give.js"></script>
   <script src="js/inventory.js"></script>
+  <script src="js/mailbox.js"></script>
   <script src="js/character.js"></script>
   <script src="js/inventory-anomalies.js"></script>
   <script src="js/character-sp-overrides.js"></script>
   <script src="js/quests.js"></script>
+  <script src="js/preview.js"></script>
   <script src="js/bindings.js"></script>
 </body>
 </html>

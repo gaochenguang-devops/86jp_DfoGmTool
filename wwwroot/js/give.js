@@ -299,7 +299,8 @@ function updateGiveDeliveryPresentation() {
   });
   const submit = $('#give-config-submit');
   if (submit) {
-    submit.textContent = giveDeliveryLabel();
+    // 勾了整套发放就换个明确的按钮文案, 免得以为只发当前这一件
+    submit.textContent = $('#give-config-send-set')?.checked ? '整套邮件发放' : giveDeliveryLabel();
     submit.disabled = giveRequestInFlight || submit.dataset.baseDisabled === 'true';
   }
 }
@@ -332,21 +333,25 @@ function bindGiveDeliveryMode() {
   updateGiveDeliveryPresentation();
 }
 
+// 背包工具栏和邮箱页各有一个清空按钮, 共用同一套确认/禁用/物理删除语义
+const CHARACTER_MAILBOX_CLEAR_BUTTONS = ['#btn-clear-character-mailbox', '#btn-clear-mail'];
+
 function updateCharacterMailboxButton() {
-  const button = $('#btn-clear-character-mailbox');
-  if (!button) return;
-  button.disabled = !currentChar || clearingCharacterMailbox;
-  button.textContent = clearingCharacterMailbox ? '清空中…' : '清空邮箱';
+  for (const selector of CHARACTER_MAILBOX_CLEAR_BUTTONS) {
+    const button = $(selector);
+    if (!button) continue;
+    button.disabled = !currentChar || clearingCharacterMailbox;
+    button.textContent = clearingCharacterMailbox ? '清空中…' : '清空邮箱';
+  }
 }
 
 function bindClearCharacterMailbox() {
-  const button = $('#btn-clear-character-mailbox');
-  if (!button || button._mailboxClearBound) {
-    updateCharacterMailboxButton();
-    return;
+  for (const selector of CHARACTER_MAILBOX_CLEAR_BUTTONS) {
+    const button = $(selector);
+    if (!button || button._mailboxClearBound) continue;
+    button._mailboxClearBound = true;
+    button.onclick = clearCurrentCharacterMailbox;
   }
-  button._mailboxClearBound = true;
-  button.onclick = clearCurrentCharacterMailbox;
   updateCharacterMailboxButton();
 }
 
@@ -376,6 +381,7 @@ async function clearCurrentCharacterMailbox() {
   } finally {
     clearingCharacterMailbox = false;
     updateCharacterMailboxButton();
+    if (typeof loadMailbox === 'function') loadMailbox();
   }
 }
 
@@ -522,7 +528,19 @@ function renderGrantConfiguration() {
 
   const { item, capability } = giveConfiguration;
   const fields = [];
-  fields.push(`<label class="give-config-field"><span>数量</span><input id="give-config-count" type="number" min="1" value="1"></label>`);
+  fields.push(`<label id="give-config-count-field" class="give-config-field"><span>数量</span><input id="give-config-count" type="number" min="1" value="1"></label>`);
+  // 整套发放: 只在能解析出成套部件时出现, 且只支持邮件(背包发放没有整套语义)
+  const setSendable = item.setSendable === true && Number(item.setId) > 0;
+  if (setSendable) {
+    const mailOnly = giveDeliveryMode === 'inventory';
+    fields.push(`<div id="give-config-set-field" class="give-config-field">` +
+      `<span>整套发放</span>` +
+      `<label class="give-config-check"><input id="give-config-send-set" type="checkbox"${mailOnly ? ' disabled' : ''}>` +
+      `<span>${escapeHtml(item.setName || '同套装部件')}</span></label>` +
+      `<div id="give-config-set-hint" class="hint">${mailOnly
+        ? '整套发放只支持邮件发放，请先切换发放方式'
+        : '勾选后按套装成员各发 1 件到邮箱，最多两封邮件'}</div></div>`);
+  }
 
   if (capability.equipment) {
     const equipment = capability.equipment;
@@ -572,7 +590,7 @@ function renderGrantConfiguration() {
       fields.push(`<label id="give-config-expiration-days-field" class="give-config-field${mode === 'custom' ? '' : ' hidden'}"><span>期限天数</span><input id="give-config-expiration-days" type="number" min="1" max="${capability.expiration.maxDays}" value="${giveConfigMemory.expirationDays || 30}"></label>`);
   }
 
-  card.innerHTML = `<div class="give-config-head"><div class="give-config-title rarity-${item.rarity >= 0 && item.rarity <= 6 ? item.rarity : 0}">${escapeHtml(item.name)}</div><div class="give-config-meta">ID ${item.itemId} · ${escapeHtml(tagLabel(item.tag))} · 当前${escapeHtml(giveDeliveryLabel())}</div></div>` +
+  card.innerHTML = `<div class="give-config-head"><div class="give-config-title">${itemPreviewName(item.itemId, item.name, item.rarity)}</div><div class="give-config-meta">ID ${item.itemId} · ${escapeHtml(tagLabel(item.tag))} · 当前${escapeHtml(giveDeliveryLabel())}</div></div>` +
     `<div class="give-config-grid">${fields.join('')}</div>` +
     `<div class="give-config-actions"><button id="give-config-cancel" type="button">取消</button><button id="give-config-submit" type="button" data-base-disabled="${grantDisabled ? 'true' : 'false'}" ${grantDisabled ? 'disabled' : ''}>${escapeHtml(giveDeliveryLabel())}</button></div>`;
   FloatingConfigPanel.show(card, {
@@ -581,6 +599,18 @@ function renderGrantConfiguration() {
 
   $('#give-config-cancel').onclick = clearGiveConfiguration;
   bindAvatarOptionSearch('give-config-avatar-option', rememberGiveConfiguration);
+  const sendSet = $('#give-config-send-set');
+  if (sendSet) {
+    // 整套发放每个部件固定 1 件, 勾上就把数量框收起来避免误填
+    sendSet.onchange = () => {
+      const countField = $('#give-config-count-field');
+      if (countField) countField.classList.toggle('hidden', sendSet.checked);
+      const count = $('#give-config-count');
+      if (count && sendSet.checked) count.value = '1';
+      updateGiveDeliveryPresentation();
+      FloatingConfigPanel.refresh(card);
+    };
+  }
   const expirationMode = $('#give-config-expiration-mode');
   if (expirationMode) {
     expirationMode.onchange = () => {
@@ -601,7 +631,8 @@ async function submitConfiguredGrant() {
   if (!giveConfiguration || giveRequestInFlight) return;
   const { item, capability } = giveConfiguration;
   rememberGiveConfiguration();
-  const count = Math.max(1, parseInt($('#give-config-count').value, 10) || 1);
+  const sendSet = $('#give-config-send-set')?.checked === true;
+  const count = sendSet ? 1 : Math.max(1, parseInt($('#give-config-count').value, 10) || 1);
   const options = {
     qualityMode: parseInt($('#give-config-quality')?.value || '1', 10),
     upgradeLevel: parseInt($('#give-config-upgrade')?.value || '0', 10),
@@ -622,7 +653,7 @@ async function submitConfiguredGrant() {
   if (expirationMode && expirationMode.value === 'custom')
     options.expirationDays = parseInt($('#give-config-expiration-days').value, 10);
 
-  await giveItem(item.itemId, count, options);
+  await giveItem(item.itemId, count, options, sendSet);
 }
 
 async function searchItems(page) {
@@ -672,8 +703,12 @@ async function searchItems(page) {
     for (const r of data.results) {
       const tr = document.createElement('tr');
       const configurable = needsGrantConfiguration(r);
+      // 套装部件多带一行套装名: 整套发放的入口在配置卡里, 这里只做标记
+      const setHint = r.setName
+        ? `<div class="hint give-set-hint">套装 ${escapeHtml(r.setName)}</div>`
+        : '';
       tr.innerHTML = `<td>${r.itemId}</td>
-        <td class="rarity-${r.rarity >= 0 && r.rarity <= 6 ? r.rarity : 0}">${escapeHtml(r.name)}</td>
+        <td>${itemPreviewName(r.itemId, r.name, r.rarity)}${setHint}</td>
         <td>${r.minLevel || ''}</td>
         <td>${r.special ? (SPECIAL_LABELS[r.special] || escapeHtml(r.special)) : (RARITY_LABELS[r.rarity] || r.rarity)}</td>
         <td title="${escapeHtml(r.tag || '')}">${escapeHtml(tagLabel(r.tag))}</td>
@@ -740,7 +775,7 @@ function bindGivePageSize() {
   });
 }
 
-async function giveItem(templateId, count, options) {
+async function giveItem(templateId, count, options, sendSet) {
   if (giveRequestInFlight) return;
   if (!currentChar) { toast('请先选择角色', true); return; }
   const characterSnapshot = {
@@ -759,12 +794,27 @@ async function giveItem(templateId, count, options) {
       : `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
     const body = { templateId, count, requestId, deliveryMode: deliveryModeSnapshot };
     if (options) body.options = options;
+    if (sendSet) body.sendSet = true;
     const r = await post(`/api/characters/${encodeURIComponent(String(characterSnapshot.characterId))}/items`, body);
-    const itemLabel = `${r.name || r.itemTemplateId || templateId} x${r.count ?? count}`;
+    const itemLabel = r.sendSet
+      ? `${r.setName || r.name || templateId}（整套 ${Number(r.itemCount || r.count || 0)} 件）`
+      : `${r.name || r.itemTemplateId || templateId} x${r.count ?? count}`;
     const deliveryHint = String(r.deliveryHint || '').trim();
     let summary;
     let fallbackHint = '';
     switch (r.delivery) {
+      case 'mail_set': {
+        const attachmentCount = Number(r.attachmentCount || 0);
+        const messageCount = Number(r.messageCount || (r.messageId ? 1 : 0));
+        const adjusted = Array.isArray(r.adjustedItems) ? r.adjustedItems : [];
+        summary = `整套邮件发放成功（${messageCount} 封邮件、${attachmentCount} 个附件）`;
+        if (adjusted.length) {
+          const names = adjusted.map((entry) => entry.name || ('#' + entry.itemId));
+          summary += `，${adjusted.length} 个部件已按自身能力调整：${names.join('、')}`;
+        }
+        fallbackHint = '重新打开邮箱即可，无需重新选择角色。';
+        break;
+      }
       case 'mail': {
         const attachmentCount = Number(r.attachmentCount || 0);
         const messageCount = Number(r.messageCount || (r.messageId ? 1 : 0));

@@ -18,6 +18,8 @@ namespace DfoGmTool.Services
         internal int MessageCount { get; set; }
         internal int AttachmentCount { get; set; }
         internal bool Replayed { get; set; }
+        // 整套发放时按部件能力回退过配置的物品; 前端据此提示"部分部件已按能力调整"。
+        internal IReadOnlyList<int> AdjustedItemIds { get; set; } = Array.Empty<int>();
 
         internal static GmSystemMailResult Fail(string error)
             => new GmSystemMailResult { Success = false, Error = error };
@@ -29,6 +31,8 @@ namespace DfoGmTool.Services
         private const string ExpireAt = "9999-12-31 23:59:59";
         private const int AttachmentsPerMessage = 10;
         private const int MaximumMailMessages = 10;
+        // 整套发放沿用上游的两封邮件上限, 与 PvfIndexService.SetSendMaxPieces 对应。
+        private const int MaximumSetMailMessages = 2;
         private static readonly Regex RequestIdPattern = new Regex(
             "^[A-Za-z0-9:_-]{8,128}$",
             RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -119,48 +123,18 @@ namespace DfoGmTool.Services
                 var body = string.IsNullOrWhiteSpace(itemName)
                     ? "GM 已向此角色发放物品，请在邮件中领取。"
                     : "GM 已发放「" + itemName.Trim() + "」，请在邮件中领取。";
-                var messageIds = new List<long>(messageCount);
-                for (var shard = 0; shard < messageCount; shard++)
-                {
-                    var offset = shard * AttachmentsPerMessage;
-                    var shardCount = Math.Min(AttachmentsPerMessage, attachmentCount - offset);
-                    var shardKey = idempotencyKeys[shard];
-                    var messageId = InsertMessage(
-                        connection,
-                        transaction,
-                        characterId,
-                        accountId,
-                        characterName,
-                        title,
-                        body,
-                        shardKey,
-                        requestHash);
-                    InsertRecipient(connection, transaction, messageId, characterId);
-
-                    for (var index = 0; index < shardCount; index++)
-                    {
-                        var attachment = attachments[offset + index];
-                        // mailbox_attachments.ordinal is scoped to one message;
-                        // never leak the global draft ordinal into a shard.
-                        attachment.Ordinal = index;
-                        InsertAttachment(connection, transaction, messageId, attachment);
-                    }
-
-                    var auditId = InsertAudit(
-                        connection,
-                        transaction,
-                        messageId,
-                        accountId,
-                        characterId,
-                        characterName,
-                        shardCount,
-                        shardKey,
-                        requestHash);
-                    for (var index = 0; index < shardCount; index++)
-                        InsertAuditAttachment(connection, transaction, auditId, attachments[offset + index]);
-
-                    messageIds.Add(messageId);
-                }
+                var messageIds = WriteShards(
+                    connection,
+                    transaction,
+                    characterId,
+                    accountId,
+                    characterName,
+                    title,
+                    (part, total) => body,
+                    attachments,
+                    idempotencyKeys,
+                    requestHash,
+                    "GM tool item grant");
 
                 transaction.Commit();
                 return new GmSystemMailResult
@@ -187,6 +161,315 @@ namespace DfoGmTool.Services
             {
                 return GmSystemMailResult.Fail("生成系统邮件失败: " + ex.Message);
             }
+        }
+
+        // 整套发放: 每个部件固定 1 件, 附件按每封 10 件分片, 最多两封。
+        // 与单件发放共用幂等 key/回放检测, 但 request_hash 走独立的输入格式, 避免与单件互相误判。
+        internal GmSystemMailResult SendItemSetGrant(
+            int characterId,
+            int expectedAccountId,
+            IReadOnlyList<int> memberIds,
+            ItemGrantOptions options,
+            string requestId,
+            string setName,
+            Func<int, string> resolveItemName)
+        {
+            requestId = (requestId ?? string.Empty).Trim();
+            if (!RequestIdPattern.IsMatch(requestId))
+                return GmSystemMailResult.Fail("发放请求编号无效，请刷新页面后重试");
+            if (memberIds == null || memberIds.Count == 0)
+                return GmSystemMailResult.Fail("套装部件为空");
+
+            options ??= new ItemGrantOptions();
+            var rootIdempotencyKey = "gm:" + requestId;
+            var requestHash = ComputeSetRequestHash(characterId, expectedAccountId, memberIds, options);
+
+            try
+            {
+                using var connection = new SqliteConnection(_connectionString);
+                connection.Open();
+                using var transaction = connection.BeginTransaction(deferred: false);
+
+                if (!TryLoadCharacter(
+                        connection,
+                        transaction,
+                        characterId,
+                        out var accountId,
+                        out var characterName,
+                        out var job))
+                {
+                    return GmSystemMailResult.Fail("角色不存在或已删除: " + characterId);
+                }
+                if (accountId != expectedAccountId)
+                    return GmSystemMailResult.Fail("角色账号归属已变化，请刷新页面后重试");
+
+                if (!TryCreateSetAttachments(
+                        job,
+                        memberIds,
+                        options,
+                        resolveItemName,
+                        out var attachments,
+                        out var adjustedItemIds,
+                        out var attachmentError))
+                {
+                    return GmSystemMailResult.Fail(attachmentError);
+                }
+
+                return SendPreparedSet(
+                    connection,
+                    transaction,
+                    characterId,
+                    accountId,
+                    characterName,
+                    attachments,
+                    adjustedItemIds,
+                    rootIdempotencyKey,
+                    requestHash,
+                    setName);
+            }
+            catch (SqliteException ex)
+            {
+                return GmSystemMailResult.Fail("写入系统邮件失败: " + ex.Message);
+            }
+            catch (OverflowException ex)
+            {
+                return GmSystemMailResult.Fail("邮件物品参数超出服务端范围: " + ex.Message);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException
+                                       || ex is ArgumentException
+                                       || ex is FormatException)
+            {
+                return GmSystemMailResult.Fail("生成系统邮件失败: " + ex.Message);
+            }
+        }
+
+        private GmSystemMailResult SendPreparedSet(
+            SqliteConnection connection,
+            SqliteTransaction transaction,
+            int characterId,
+            int accountId,
+            string characterName,
+            IReadOnlyList<GmMailAttachmentDraft> attachments,
+            IReadOnlyList<int> adjustedItemIds,
+            string rootIdempotencyKey,
+            string requestHash,
+            string setName)
+        {
+            var attachmentCount = attachments.Count;
+            var messageCount = (attachmentCount + AttachmentsPerMessage - 1) / AttachmentsPerMessage;
+            if (messageCount <= 0 || messageCount > MaximumSetMailMessages)
+            {
+                return GmSystemMailResult.Fail(
+                    "套装部件超过两封邮件上限：每封最多 " + AttachmentsPerMessage
+                    + " 个附件（本次需要 " + messageCount + " 封）");
+            }
+
+            var idempotencyKeys = BuildIdempotencyKeys(rootIdempotencyKey, messageCount);
+            var replay = TryLoadReplaySet(
+                connection,
+                transaction,
+                characterId,
+                idempotencyKeys,
+                requestHash,
+                attachmentCount);
+            if (replay != null)
+                return replay;
+
+            var display = string.IsNullOrWhiteSpace(setName) ? "套装" : setName.Trim();
+            var messageIds = WriteShards(
+                connection,
+                transaction,
+                characterId,
+                accountId,
+                characterName,
+                "GM套装发放",
+                (part, total) => total <= 1
+                    ? "GM 已发放套装「" + display + "」，请在邮件中领取。"
+                    : "GM 已发放套装「" + display + "」（" + part + "/" + total + "），请在邮件中领取。",
+                attachments,
+                idempotencyKeys,
+                requestHash,
+                "GM tool item set grant");
+
+            transaction.Commit();
+            return new GmSystemMailResult
+            {
+                Success = true,
+                MessageId = messageIds[0],
+                MessageIds = messageIds,
+                MessageCount = messageIds.Count,
+                AttachmentCount = attachmentCount,
+                Replayed = false,
+                AdjustedItemIds = adjustedItemIds ?? Array.Empty<int>(),
+            };
+        }
+
+        private bool TryCreateSetAttachments(
+            int job,
+            IReadOnlyList<int> memberIds,
+            ItemGrantOptions options,
+            Func<int, string> resolveItemName,
+            out IReadOnlyList<GmMailAttachmentDraft> attachments,
+            out IReadOnlyList<int> adjustedItemIds,
+            out string error)
+        {
+            attachments = Array.Empty<GmMailAttachmentDraft>();
+            adjustedItemIds = Array.Empty<int>();
+            error = null;
+
+            var drafts = new List<GmMailAttachmentDraft>(memberIds.Count);
+            var adjusted = new List<int>();
+            foreach (var memberId in memberIds)
+            {
+                if (!TryCreateSetPieceAttachments(
+                        job,
+                        memberId,
+                        options,
+                        out var pieces,
+                        out var wasAdjusted,
+                        out var pieceError))
+                {
+                    var label = resolveItemName?.Invoke(memberId);
+                    error = (string.IsNullOrWhiteSpace(label) ? "物品 " + memberId : label)
+                        + ": " + (pieceError ?? "无法生成邮件附件");
+                    return false;
+                }
+
+                if (wasAdjusted)
+                    adjusted.Add(memberId);
+                drafts.AddRange(pieces);
+            }
+
+            attachments = drafts;
+            adjustedItemIds = adjusted;
+            return true;
+        }
+
+        // 套装里各部件能力不同(戒指不能锻造、防具不能加红字、部分部件不限期),
+        // 逐级回退到该部件支持的配置, 而不是让整套发放直接失败。
+        private bool TryCreateSetPieceAttachments(
+            int job,
+            int itemTemplateId,
+            ItemGrantOptions options,
+            out IReadOnlyList<GmMailAttachmentDraft> attachments,
+            out bool adjusted,
+            out string error)
+        {
+            adjusted = false;
+            if (_inventory.TryCreateMailAttachments(job, itemTemplateId, 1, options, out attachments, out error))
+                return true;
+
+            var firstError = error;
+            foreach (var fallback in BuildSetPieceFallbacks(itemTemplateId, options))
+            {
+                if (_inventory.TryCreateMailAttachments(job, itemTemplateId, 1, fallback, out attachments, out error))
+                {
+                    adjusted = true;
+                    return true;
+                }
+            }
+
+            error = string.IsNullOrWhiteSpace(error) ? firstError : error;
+            return false;
+        }
+
+        private static IEnumerable<ItemGrantOptions> BuildSetPieceFallbacks(
+            int itemTemplateId,
+            ItemGrantOptions options)
+        {
+            var trimmed = TrimToPieceCapability(itemTemplateId, options);
+            if (trimmed != null)
+                yield return trimmed;
+            // 只保留品级: 丢掉强化/红字/锻造/期限/装扮属性
+            yield return new ItemGrantOptions { QualityMode = options.QualityMode };
+            yield return new ItemGrantOptions();
+        }
+
+        private static ItemGrantOptions TrimToPieceCapability(int itemTemplateId, ItemGrantOptions options)
+        {
+            var metadata = ItemMetadataResolver.Resolve(itemTemplateId);
+            if (metadata == null)
+                return null;
+
+            var capability = EquipmentGrantPolicy.Describe(metadata);
+            if (!capability.IsEquipment)
+                return null;
+
+            // 强化等级在有红字时也能写入, 与 EquipmentGrantPolicy.TryApplyToBuilder 的判断保持一致
+            var amplifyType = capability.CanAmplify ? options.AmplifyType : 0;
+            return new ItemGrantOptions
+            {
+                QualityMode = options.QualityMode,
+                UpgradeLevel = capability.CanUpgrade || amplifyType > 0 ? options.UpgradeLevel : 0,
+                AmplifyType = amplifyType,
+                ForgingLevel = capability.CanForge ? options.ForgingLevel : 0,
+                AvatarOptionValue = options.AvatarOptionValue,
+                ExpirationDays = options.ExpirationDays,
+                ManualGrantType = options.ManualGrantType,
+            };
+        }
+
+        // 分片写入: 每封最多 AttachmentsPerMessage 个附件, 附件 ordinal 按封重新编号。
+        private static List<long> WriteShards(
+            SqliteConnection connection,
+            SqliteTransaction transaction,
+            int characterId,
+            int accountId,
+            string characterName,
+            string title,
+            Func<int, int, string> bodyFactory,
+            IReadOnlyList<GmMailAttachmentDraft> attachments,
+            IReadOnlyList<string> idempotencyKeys,
+            string requestHash,
+            string auditReason)
+        {
+            var attachmentCount = attachments.Count;
+            var messageCount = idempotencyKeys.Count;
+            var messageIds = new List<long>(messageCount);
+            for (var shard = 0; shard < messageCount; shard++)
+            {
+                var offset = shard * AttachmentsPerMessage;
+                var shardCount = Math.Min(AttachmentsPerMessage, attachmentCount - offset);
+                var shardKey = idempotencyKeys[shard];
+                var messageId = InsertMessage(
+                    connection,
+                    transaction,
+                    characterId,
+                    accountId,
+                    characterName,
+                    title,
+                    bodyFactory(shard + 1, messageCount),
+                    shardKey,
+                    requestHash);
+                InsertRecipient(connection, transaction, messageId, characterId);
+
+                for (var index = 0; index < shardCount; index++)
+                {
+                    var attachment = attachments[offset + index];
+                    // mailbox_attachments.ordinal is scoped to one message;
+                    // never leak the global draft ordinal into a shard.
+                    attachment.Ordinal = index;
+                    InsertAttachment(connection, transaction, messageId, attachment);
+                }
+
+                var auditId = InsertAudit(
+                    connection,
+                    transaction,
+                    messageId,
+                    accountId,
+                    characterId,
+                    characterName,
+                    shardCount,
+                    shardKey,
+                    requestHash,
+                    auditReason);
+                for (var index = 0; index < shardCount; index++)
+                    InsertAuditAttachment(connection, transaction, auditId, attachments[offset + index]);
+
+                messageIds.Add(messageId);
+            }
+
+            return messageIds;
         }
 
         private static bool TryLoadCharacter(
@@ -455,7 +738,8 @@ INSERT INTO mailbox_attachments (
             string characterName,
             int attachmentCount,
             string idempotencyKey,
-            string requestHash)
+            string requestHash,
+            string auditReason)
         {
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
@@ -476,7 +760,7 @@ SELECT last_insert_rowid();";
             command.Parameters.AddWithValue("@aid", accountId);
             command.Parameters.AddWithValue("@cid", characterId);
             command.Parameters.AddWithValue("@actor", "dfo-gm-tool");
-            command.Parameters.AddWithValue("@reason", "GM tool item grant");
+            command.Parameters.AddWithValue("@reason", auditReason ?? "GM tool item grant");
             command.Parameters.AddWithValue("@receiverName", characterName ?? string.Empty);
             command.Parameters.AddWithValue("@attachmentCount", attachmentCount);
             command.Parameters.AddWithValue("@key", idempotencyKey);
@@ -527,6 +811,37 @@ INSERT INTO mailbox_system_mail_audit_attachments (
                 accountId.ToString(CultureInfo.InvariantCulture),
                 itemTemplateId.ToString(CultureInfo.InvariantCulture),
                 count.ToString(CultureInfo.InvariantCulture),
+                ((int)options.QualityMode).ToString(CultureInfo.InvariantCulture),
+                options.UpgradeLevel.ToString(CultureInfo.InvariantCulture),
+                options.AmplifyType.ToString(CultureInfo.InvariantCulture),
+                options.ForgingLevel.ToString(CultureInfo.InvariantCulture),
+                options.AvatarOptionValue?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                options.ExpirationDays?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                (options.ManualGrantType ?? string.Empty).Trim().ToLowerInvariant(),
+            };
+            var builder = new StringBuilder(256);
+            foreach (var field in fields)
+                builder.Append(field.Length).Append(':').Append(field).Append('|');
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
+        }
+
+        // 独立的输入格式("set|" 前缀 + 部件列表), 不改动单件发放的哈希输入,
+        // 否则已经躺在邮箱里的旧请求会被判成"同一编号不同内容"。
+        private static string ComputeSetRequestHash(
+            int characterId,
+            int accountId,
+            IReadOnlyList<int> memberIds,
+            ItemGrantOptions options)
+        {
+            var members = new List<string>(memberIds.Count);
+            foreach (var memberId in memberIds)
+                members.Add(memberId.ToString(CultureInfo.InvariantCulture));
+            var fields = new List<string>
+            {
+                "set",
+                characterId.ToString(CultureInfo.InvariantCulture),
+                accountId.ToString(CultureInfo.InvariantCulture),
+                string.Join(",", members),
                 ((int)options.QualityMode).ToString(CultureInfo.InvariantCulture),
                 options.UpgradeLevel.ToString(CultureInfo.InvariantCulture),
                 options.AmplifyType.ToString(CultureInfo.InvariantCulture),
