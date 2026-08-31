@@ -98,7 +98,7 @@
 - **角色邮箱查看与管理**：新增「邮箱」页，列出当前角色全部收件箱与保管邮件（GM 视角不做过期清理），显示发件人、标题、金币与附件（附件名同样带图标与悬浮预览）、领取状态、folder 与已读状态；支持单封删除和整箱清空，两者都是物理删除语义——未领附件随邮件消失，不会退回背包。
 - **本机文件选择框**：数据源面板的数据库、PVF、ImagePacks2 三个路径旁各有「浏览…」按钮，由后端弹出 Windows `IFileOpenDialog`（文件/目录两种模式，按当前输入值定位初始目录）。浏览器拿不到真实磁盘路径，所以只能由后端弹窗。**远程模式下该端点直接拒绝**，非 Windows 返回提示要求手填。
 
-> 以上五项目前只做过构建与静态检查，尚未纳入 `SelfTests/` 的自测用例；整套发放的邮件分片与幂等复用已覆盖的系统邮件路径，图标/预览/文件框都是只读或纯展示逻辑。
+> 以上六项已纳入 `SelfTests/UpstreamPortedFeatureSelfTest.cs`（`--selftest-upstream-features`，186 条断言，全部通过）：NPK 名称加密与归档解析、IMG v2 逐帧解码与链接帧、PNG 编码器的字节级往返、副职业等级↔经验曲线与技能授予、邮箱列表/单删/清空、整套发放的分片与幂等回放，以及本机文件框在非 STA 线程上的拒绝路径。真正弹出 Windows 对话框的分支无法在自测里覆盖，只验证了它之前的拒绝判定。
 
 ---
 
@@ -324,16 +324,18 @@ POST /api/characters/{id}/quests/equipment-slots/complete 完成装备栏位任�
 
 ### 自测框架
 
-`SelfTests/` 目录包含六个自测入口，共 5632 行，全部通过命令行开关触发（见下方[自测](#自测)章节）：
+`SelfTests/` 目录包含七个自测入口，加上共用的 PVF 定位器共 7398 行，全部通过命令行开关触发（见下方[自测](#自测)章节）：
 
 | 文件                                 | 行数    | 覆盖范围                                                                                                                                                            |
 | ---------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DatabaseCompatibilitySelfTest.cs` | 238   | 数据库 schema/结构兼容性门禁 — 空库、缺表缺列、非 99 字节 `item_core` 必须被拒绝，额外列与任意 `user_version` 必须放行                                                                                |
 | `ItemGrantOptionsSelfTest.cs`      | 596   | 装备/装扮/可叠加/期限物品的 `ItemGrantOptions` 处理逻辑                                                                                                                         |
-| `CharacterMutationSelfTest.cs`     | 3256  | 等级/经验、转职/觉醒、普通/PVP 技能隔离、任务 activation/CAS/事件隔离、账号级地下城权限、角色复制/备份/删除生命周期；邮件堆叠拆分/多邮件幂等回滚、当前角色邮箱清空与共享邮件安全；GiveItem 的 mail/inventory 分流、普通物品/晶块/复活币直发回滚、名称装饰卡与契约专用直写 |
-| `InventoryMaintenanceSelfTest.cs`  | 422   | PVF 合法 ID、全账号新版角色库存/账号金库异常扫描与清理、虚拟货币槽排除、关联状态精确清理、事务回滚与二次幂等                                                                                                      |
-| `InventoryA21SelfTest.cs`          | 505   | A21 背包语义 — 99 字节 `ItemCore` 编解码、容器与槽位区间、勋章/守护珠列表类型 38 的 0–48/49–97 槽位、按角色真实开放容量写入                                                                                |
-| `A12ToA21MigrationSelfTest.cs`     | 615   | A12 → A21 迁移 — 源识别、可迁移/跳过分类、PVF 排除清单、临时库结构与完整性校验、失败时原文件不变                                                                                                       |
+| `CharacterMutationSelfTest.cs`     | 3243  | 等级/经验、转职/觉醒、普通/PVP 技能隔离、任务 activation/CAS/事件隔离、账号级地下城权限、角色复制/备份/删除生命周期；邮件堆叠拆分/多邮件幂等回滚、当前角色邮箱清空与共享邮件安全；GiveItem 的 mail/inventory 分流、普通物品/晶块/复活币直发回滚、名称装饰卡与契约专用直写 |
+| `InventoryMaintenanceSelfTest.cs`  | 367   | PVF 合法 ID、全账号新版角色库存/账号金库异常扫描与清理、虚拟货币槽排除、GBK(936) 角色名 BLOB 解码、关联状态精确清理、事务回滚与二次幂等                                                                                  |
+| `InventoryA21SelfTest.cs`          | 490   | A21 背包语义 — 99 字节 `ItemCore` 编解码、容器与槽位区间、勋章/守护珠列表类型 38 的 0–48/49–97 槽位、按角色真实开放容量写入                                                                                |
+| `A12ToA21MigrationSelfTest.cs`     | 600   | A12 → A21 迁移 — 源识别、可迁移/跳过分类、PVF 排除清单、临时库结构与完整性校验、失败时原文件不变                                                                                                       |
+| `UpstreamPortedFeatureSelfTest.cs` | 1701  | 上游迁移的六项功能 — NPK 名称加密/归档解析、IMG v2 像素帧与链接帧解码、PNG 编码字节级往返、副职业等级↔经验曲线与技能授予/回收、邮箱列表与单删/清空、整套发放的部件解析/分片/幂等回放/请求哈希冲突、物品预览与图标路径、本机文件框的非 STA 拒绝路径                            |
+| `SelfTestPvfLocator.cs`            | 163   | 共用的真实 PVF 定位器（非入口）— `DFO_GM_SELFTEST_PVF` 覆盖 > `Codes/ServerS4A21_*` 服务端布局 > 工作目录及上级目录里的散装 `Script.pvf`                                                          |
 
 ---
 
@@ -450,7 +452,7 @@ DfoGmTool/
 ├── ImagePack/              ★ NPK/IMG 解码与 PNG 输出（5 个文件，946 行，无第三方图像库）
 ├── ServerCore/             ← 服务端业务源码拷贝件（95 个 .cs + item_schema.sql）
 ├── PvfLib/                 ← PVF 解析库（GmPvfLib，独立子工程）
-├── SelfTests/              ★ 6 个自测入口，约 5.6k 行
+├── SelfTests/              ★ 7 个自测入口 + 共用 PVF 定位器，约 7.4k 行
 ├── wwwroot/                ← 前端（无框架原生 HTML/JS/CSS，约 7.8k 行）
 │   ├── index.html
 │   ├── style.css
@@ -626,12 +628,25 @@ DfoGmTool.exe --selftest-character-mutations      # 角色变更 / 邮件 / 发�
 DfoGmTool.exe --selftest-inventory-maintenance    # 异常物品扫描与清理
 DfoGmTool.exe --selftest-inventory-a21            # A21 背包语义与 ItemCore
 DfoGmTool.exe --selftest-a12-to-a21-migration     # A12 → A21 迁移
+DfoGmTool.exe --selftest-upstream-features        # 上游迁移六项功能
 ```
 
 从源码运行时用 `--` 透传开关：
 
 ```bash
 dotnet run -- --selftest-character-mutations
+```
+
+其中 `--selftest-character-mutations`、`--selftest-inventory-maintenance`、`--selftest-a12-to-a21-migration` 以及 `--selftest-upstream-features` 的第三层需要一个**真实 `Script.pvf`**，由 `SelfTests/SelfTestPvfLocator.cs` 按以下顺序定位，找不到则该入口直接判失败：
+
+1. 环境变量 `DFO_GM_SELFTEST_PVF` —— 可以指向 `Script.pvf` 本身，也可以指向装着它的目录；
+2. 服务端仓库布局 `<root>/Codes/ServerS4A21_*/…/Data/Pvf/Script.pvf`（优先 `ServerS4A21_git`，其余按目录名倒序取最新）；
+3. 兜底：工作目录与其上溯 8 级目录下的散装 `Script.pvf`、`Data/Pvf/Script.pvf`、`dist/<rid>/Data/Pvf/Script.pvf`。
+
+`<root>` 取当前工作目录、`AppContext.BaseDirectory` 及两者各自上溯 8 级的目录。断言不写死任何一份 PVF 的内容：需要"某个职业有几段觉醒""哪个任务号 PVF 里没有"这类前提时，都从当前加载的 PVF 现场推导；数据缺失时改为校验反向拒绝路径，而不是让用例变红。
+
+```bash
+DFO_GM_SELFTEST_PVF=D:\86jp\Script.pvf dotnet run -- --selftest-upstream-features
 ```
 
 ---

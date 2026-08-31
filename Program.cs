@@ -45,6 +45,11 @@ namespace DfoGmTool
                 Environment.Exit(SelfTests.A12ToA21MigrationSelfTest.Run());
                 return;
             }
+            if (Array.IndexOf(args, "--selftest-upstream-features") >= 0)
+            {
+                Environment.Exit(SelfTests.UpstreamPortedFeatureSelfTest.Run());
+                return;
+            }
 
             GmToolHostConfig hostConfig;
             GmConfig initialConfig;

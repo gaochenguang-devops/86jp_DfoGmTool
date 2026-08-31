@@ -70,7 +70,7 @@ namespace DfoGmTool.SelfTests
                     && DetailHas(status, "character", CharacterTwo, 0, 0, "item_core_null_or_invalid_length")
                     && DetailHas(status, "accountCargo", 0, 12, 987654322, "item_id_not_in_pvf");
                 Check("status details include all anomaly reasons and containers", detailsOk);
-                Check("status decodes UTF-8 BLOB character names",
+                Check("status decodes GBK(936) BLOB character names",
                     DetailHasName(status, "character", CharacterOne, "角色一"));
                 Check("virtual currency slots are never reported",
                     DetailHasNo(status, "character", CharacterOne, 0, 0));
@@ -141,7 +141,7 @@ INSERT INTO accounts(account_id,m_id,password_hash) VALUES
 ({AccountTwo},'inventory-maintenance-two','');");
             Exec(connection, transaction, $@"
 INSERT INTO characters(character_id,account_id,name,job,grow_type,level,exp,slot_index) VALUES
-({CharacterOne},{AccountOne},CAST(X'E8A792E889B2E4B880' AS BLOB),0,0,1,0,0),
+({CharacterOne},{AccountOne},CAST(X'BDC7C9ABD2BB' AS BLOB),0,0,1,0,0),
 ({CharacterTwo},{AccountTwo},'inventory-maintenance-two',0,0,1,0,0);");
             transaction.Commit();
         }
@@ -351,62 +351,7 @@ BEGIN SELECT RAISE(ABORT,'inventory maintenance selftest failure'); END;");
             Check("PVF index ready", index.IsReady && string.IsNullOrWhiteSpace(index.BuildError), index.BuildError);
         }
 
-        private static string ResolveLatestServerPvf()
-        {
-            foreach (var root in EnumerateSearchRoots())
-            {
-                var codesRoot = Path.Combine(root, "Codes");
-                if (!Directory.Exists(codesRoot))
-                    continue;
-
-                var exact = Path.Combine(codesRoot, "ServerS4A21_git", "Server", "DfoServer", "Data", "Pvf", "Script.pvf");
-                if (File.Exists(exact))
-                    return exact;
-
-                foreach (var serverDir in Directory.GetDirectories(codesRoot, "ServerS4A21_*").OrderByDescending(value => value))
-                {
-                    foreach (var path in new[]
-                    {
-                        Path.Combine(serverDir, "dist", "linux-x64", "Data", "Pvf", "Script.pvf"),
-                        Path.Combine(serverDir, "Server", "DfoServer", "bin", "Release", "win-x64", "Data", "Pvf", "Script.pvf"),
-                        Path.Combine(serverDir, "Server", "DfoServer", "bin", "Debug", "Data", "Pvf", "Script.pvf"),
-                        Path.Combine(serverDir, "Server", "DfoServer", "Data", "Pvf", "Script.pvf"),
-                    })
-                    {
-                        if (File.Exists(path))
-                            return path;
-                    }
-                }
-            }
-            return null;
-        }
-
-        private static IEnumerable<string> EnumerateSearchRoots()
-        {
-            var roots = new List<string>();
-            AddRoot(roots, Directory.GetCurrentDirectory());
-            AddRoot(roots, AppContext.BaseDirectory);
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
-            for (var i = 0; i < 8 && directory != null; i++, directory = directory.Parent)
-                AddRoot(roots, directory.FullName);
-            return roots;
-        }
-
-        private static void AddRoot(List<string> roots, string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-                return;
-            try
-            {
-                path = Path.GetFullPath(path);
-            }
-            catch
-            {
-                return;
-            }
-            if (!roots.Contains(path, StringComparer.OrdinalIgnoreCase))
-                roots.Add(path);
-        }
+        private static string ResolveLatestServerPvf() => SelfTestPvfLocator.ResolveLatestServerPvf();
 
         private static void Check(string name, bool condition, string error = null)
         {

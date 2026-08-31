@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -140,28 +141,36 @@ namespace DfoGmTool.SelfTests
                 && !item.RequiresConfiguration).ToArray();
             Check("PVF contains direct-grant weapon or aurora avatars", directSpecialAvatars.Length > 0);
 
-            var darkSwordmanOptions = pvfIndex.GetJobGrowOptions(9);
-            var creatorMageOptions = pvfIndex.GetJobGrowOptions(10);
-            Check("DSSwordman explicit max grow count 0 keeps direct awakening",
-                GetCollectionCount(darkSwordmanOptions, "growTypes") == 1
-                && GetCollectionCount(FindListedItem(darkSwordmanOptions, "growTypes", "value", 0), "awakenings") == 2);
-            Check("CreatorMage explicit max grow count 0 keeps direct awakening",
-                GetCollectionCount(creatorMageOptions, "growTypes") == 1
-                && GetCollectionCount(FindListedItem(creatorMageOptions, "growTypes", "value", 0), "awakenings") == 2);
-            Check("DSSwordman rejects PVF-missing first grow",
-                !pvfIndex.TryValidateJobGrowOption(9, 1, 0, out _));
-            Check("CreatorMage rejects PVF-missing first grow",
-                !pvfIndex.TryValidateJobGrowOption(10, 1, 0, out _));
-            Check("DSSwordman direct awakenings validate",
-                pvfIndex.TryValidateJobGrowOption(9, 0, 1, out _)
-                && pvfIndex.TryValidateJobGrowOption(9, 0, 2, out _)
-                && pvfIndex.ResolveJobName(9, 0x10) != null
-                && pvfIndex.ResolveJobName(9, 0x20) != null);
-            Check("CreatorMage direct awakenings validate",
-                pvfIndex.TryValidateJobGrowOption(10, 0, 1, out _)
-                && pvfIndex.TryValidateJobGrowOption(10, 0, 2, out _)
-                && pvfIndex.ResolveJobName(10, 0x10) != null
-                && pvfIndex.ResolveJobName(10, 0x20) != null);
+            // 职业 9/10 在 A21 里是 [max grow count] 0 的直接觉醒职业, 但各服 PVF 会改这两个 .chr
+            // (本机这份把 DSSwordman 写成了带 5 个转职名的剑士树, 再用 max grow count 0 关掉转职)。
+            // 所以觉醒条数只能从 PVF 读出来, 断言改成校验三个出口彼此一致 —— 真正要守的是
+            // "max grow count 0 时那 5 个残留转职名不许泄漏成可选项", 这条与 PVF 内容无关。
+            CheckMaxGrowCountZeroJob(pvfIndex, 9, "DSSwordman");
+            CheckMaxGrowCountZeroJob(pvfIndex, 10, "CreatorMage");
+        }
+
+        private static void CheckMaxGrowCountZeroJob(PvfIndexService pvfIndex, int job, string label)
+        {
+            var options = pvfIndex.GetJobGrowOptions(job);
+            var directAwakenings = GetCollectionCount(
+                FindListedItem(options, "growTypes", "value", 0), "awakenings");
+            Check(label + " explicit max grow count 0 keeps only the direct-awakening branch",
+                GetCollectionCount(options, "growTypes") == (directAwakenings > 0 ? 1 : 0),
+                "growTypes=" + GetCollectionCount(options, "growTypes") + ", awakenings=" + directAwakenings);
+            Check(label + " rejects PVF-missing first grow",
+                !pvfIndex.TryValidateJobGrowOption(job, 1, 0, out _));
+
+            var validated = true;
+            for (var second = 1; second <= directAwakenings; second++)
+            {
+                validated &= pvfIndex.TryValidateJobGrowOption(job, 0, second, out _)
+                    && pvfIndex.ResolveJobName(job, second << 4) != null;
+            }
+            Check(label + " direct awakenings validate",
+                validated
+                && !pvfIndex.TryValidateJobGrowOption(job, 0, directAwakenings + 1, out var overflowError)
+                && !string.IsNullOrWhiteSpace(overflowError),
+                "awakenings=" + directAwakenings);
         }
 
         private static void CheckCharacterNameDecoding()
@@ -314,36 +323,51 @@ namespace DfoGmTool.SelfTests
             gm.SetLevel(CharacterId, 75);
             var directBase = gm.SetGrowTypeFixed(CharacterId, 9, 0, 0);
             Check("DSSwordman accepts PVF direct-awakening base state", IsSuccess(directBase));
-            var directProfession = gm.CompleteProfessionQuests(CharacterId, pvfIndex, null);
-            var directStage1Ids = pvfIndex.AllQuestMeta.Values
-                .Where(meta => meta != null
-                    && meta.RewardChainType == 1
-                    && meta.GrowNumber > 0
-                    && (meta.TargetCharacter ?? string.Empty).Contains("[demonic swordman]", StringComparison.OrdinalIgnoreCase))
-                .Select(meta => meta.Id)
-                .Distinct()
-                .ToArray();
-            var directStage1Sql = directStage1Ids.Length == 0
-                ? 0
-                : LoadInt(dbPath, $"SELECT COUNT(*) FROM character_quest_completions WHERE character_id={CharacterId} AND quest_id IN ({string.Join(",", directStage1Ids)})");
-            Check("direct-awakening profession quests complete both PVF stages",
-                IsSuccess(directProfession)
-                && GetIntProperty(directProfession, "first") == 0
-                && GetIntProperty(directProfession, "second") == 2
-                && LoadInt(dbPath, "SELECT grow_type FROM characters WHERE character_id=926014") == 32
-                && LoadInt(dbPath, "SELECT COUNT(*) FROM character_quest_completions WHERE character_id=926014 AND quest_id=2680") == 1
-                && LoadInt(dbPath, "SELECT COUNT(*) FROM character_quest_completions WHERE character_id=926014 AND quest_id=2681") == 1);
-            Check("direct awakening does not manufacture a stage-1 quest", directStage1Sql == 0);
+
+            // 只有当前 PVF 真给了职业 9 直接觉醒数据时, 下面这套正向流程才成立;
+            // 被改成"剑士树 + max grow count 0"的 PVF 走 else 分支验证反向拒绝。
+            var directAwakeningCount = GetCollectionCount(
+                FindListedItem(pvfIndex.GetJobGrowOptions(9), "growTypes", "value", 0), "awakenings");
+            if (directAwakeningCount >= 2)
+            {
+                var directProfession = gm.CompleteProfessionQuests(CharacterId, pvfIndex, null);
+                var directStage1Ids = pvfIndex.AllQuestMeta.Values
+                    .Where(meta => meta != null
+                        && meta.RewardChainType == 1
+                        && meta.GrowNumber > 0
+                        && (meta.TargetCharacter ?? string.Empty).Contains("[demonic swordman]", StringComparison.OrdinalIgnoreCase))
+                    .Select(meta => meta.Id)
+                    .Distinct()
+                    .ToArray();
+                var directStage1Sql = directStage1Ids.Length == 0
+                    ? 0
+                    : LoadInt(dbPath, $"SELECT COUNT(*) FROM character_quest_completions WHERE character_id={CharacterId} AND quest_id IN ({string.Join(",", directStage1Ids)})");
+                Check("direct-awakening profession quests complete both PVF stages",
+                    IsSuccess(directProfession)
+                    && GetIntProperty(directProfession, "first") == 0
+                    && GetIntProperty(directProfession, "second") == 2
+                    && LoadInt(dbPath, "SELECT grow_type FROM characters WHERE character_id=926014") == 32
+                    && LoadInt(dbPath, "SELECT COUNT(*) FROM character_quest_completions WHERE character_id=926014 AND quest_id=2680") == 1
+                    && LoadInt(dbPath, "SELECT COUNT(*) FROM character_quest_completions WHERE character_id=926014 AND quest_id=2681") == 1);
+                Check("direct awakening does not manufacture a stage-1 quest", directStage1Sql == 0);
+                var directFirst = gm.SetGrowTypeFixed(CharacterId, 9, 0, 1);
+                Check("DSSwordman writes native direct-awakening 0x10",
+                    IsSuccess(directFirst)
+                    && LoadInt(dbPath, "SELECT grow_type FROM characters WHERE character_id=926014") == 16);
+                var directSecond = gm.SetGrowTypeFixed(CharacterId, 9, 0, 2);
+                Check("DSSwordman writes native direct-awakening 0x20",
+                    IsSuccess(directSecond)
+                    && LoadInt(dbPath, "SELECT grow_type FROM characters WHERE character_id=926014") == 32);
+            }
+            else
+            {
+                Check("DSSwordman without PVF awakening data refuses to invent one",
+                    !IsSuccess(gm.SetGrowTypeFixed(CharacterId, 9, 0, 1))
+                    && LoadInt(dbPath, "SELECT grow_type FROM characters WHERE character_id=926014") == 0,
+                    "awakenings=" + directAwakeningCount);
+            }
             var invalidDirectFirst = gm.SetGrowTypeFixed(CharacterId, 9, 1, 0);
             Check("DSSwordman still rejects nonexistent first grow", !IsSuccess(invalidDirectFirst));
-            var directFirst = gm.SetGrowTypeFixed(CharacterId, 9, 0, 1);
-            Check("DSSwordman writes native direct-awakening 0x10",
-                IsSuccess(directFirst)
-                && LoadInt(dbPath, "SELECT grow_type FROM characters WHERE character_id=926014") == 16);
-            var directSecond = gm.SetGrowTypeFixed(CharacterId, 9, 0, 2);
-            Check("DSSwordman writes native direct-awakening 0x20",
-                IsSuccess(directSecond)
-                && LoadInt(dbPath, "SELECT grow_type FROM characters WHERE character_id=926014") == 32);
             gm.SetGrowTypeFixed(CharacterId, 0, 1, 1);
         }
 
@@ -559,10 +583,18 @@ WHERE character_id=926014 AND event_id='{eventId:N}' AND event_kind='gm-selftest
             Check("valid PVF/job quest completes", IsSuccess(validResult)
                 && LoadInt(dbPath, $"SELECT COUNT(*) FROM character_quest_completions WHERE character_id={CharacterId} AND quest_id={valid.Id}") == 1);
 
-            var missing = gm.ForceCompleteQuest(CharacterId, 20723);
-            Check("PVF-missing quest 20723 is rejected", !IsSuccess(missing)
-                && (GetStringProperty(missing, "error") ?? string.Empty).Contains("20723", StringComparison.Ordinal)
-                && LoadInt(dbPath, $"SELECT COUNT(*) FROM character_quest_completions WHERE character_id={CharacterId} AND quest_id=20723") == 0);
+            // 不能写死某个"PVF 里没有"的任务号: 不同 PVF 的任务表不一样(本机这份就带 20723)。
+            // 从可写区间顶端往下找一个当前 PVF 未使用的号, 断言才跟着数据走。
+            var missingQuestId = FindQuestIdMissingFromPvf(pvfIndex);
+            Check("PVF exposes an unused quest id inside the writable range", missingQuestId > 0);
+            if (missingQuestId <= 0)
+                return;
+
+            var missing = gm.ForceCompleteQuest(CharacterId, missingQuestId);
+            Check("PVF-missing quest is rejected", !IsSuccess(missing)
+                && (GetStringProperty(missing, "error") ?? string.Empty)
+                    .Contains(missingQuestId.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                && LoadInt(dbPath, $"SELECT COUNT(*) FROM character_quest_completions WHERE character_id={CharacterId} AND quest_id={missingQuestId}") == 0);
 
             var mismatch = pvfIndex.AllQuestMeta.Values
                 .Where(meta => meta != null
@@ -584,7 +616,7 @@ WHERE character_id=926014 AND event_id='{eventId:N}' AND event_kind='gm-selftest
                 && (GetStringProperty(mismatchResult, "error") ?? string.Empty).Contains("不匹配", StringComparison.Ordinal)
                 && LoadInt(dbPath, $"SELECT COUNT(*) FROM character_quest_completions WHERE character_id={CharacterId} AND quest_id={mismatch.Id}") == 0);
 
-            var batch = gm.CompleteQuestBatch(CharacterId, new List<int> { batchValid.Id, 20723, mismatch.Id, 30000 });
+            var batch = gm.CompleteQuestBatch(CharacterId, new List<int> { batchValid.Id, missingQuestId, mismatch.Id, 30000 });
             Check("mixed quest batch counts only valid writes", IsSuccess(batch)
                 && GetIntProperty(batch, "completedCount") == 1
                 && GetCollectionCount(batch, "skipped") == 3
@@ -630,6 +662,20 @@ WHERE character_id=926014 AND event_id='{eventId:N}' AND event_kind='gm-selftest
                 activeRejected && completionRejected && valueRejected
                 && LoadInt(dbPath, $"SELECT COUNT(*) FROM character_active_quests WHERE character_id={CharacterId} AND quest_id=30000") == 0
                 && LoadInt(dbPath, $"SELECT COUNT(*) FROM character_quest_completions WHERE character_id={CharacterId} AND quest_id=30000") == 0);
+        }
+
+        // 从可写区间顶端往下找第一个当前 PVF 未收录的任务号, 用来验证"PVF 里没有"这条拒绝路径。
+        private static int FindQuestIdMissingFromPvf(PvfIndexService pvfIndex)
+        {
+            var meta = pvfIndex.AllQuestMeta;
+            for (var id = ServerCore.Game.Quests.QuestRepository.MaximumQuestId;
+                id >= ServerCore.Game.Quests.QuestRepository.MinimumQuestId;
+                id--)
+            {
+                if (meta == null || !meta.ContainsKey(id))
+                    return id;
+            }
+            return -1;
         }
 
         private static void CheckPetGrantPersistence(GmService gm, PvfIndexService pvfIndex, string dbPath)
@@ -2970,66 +3016,7 @@ INSERT INTO character_skills(character_id, page_index, slot, skill_id, level) VA
             }
         }
 
-        private static string ResolveLatestServerPvf()
-        {
-            foreach (var root in EnumerateSearchRoots())
-            {
-                var codesRoot = Path.Combine(root, "Codes");
-                if (!Directory.Exists(codesRoot))
-                    continue;
-
-                var exact = Path.Combine(codesRoot, "ServerS4A21_git", "Server", "DfoServer", "Data", "Pvf", "Script.pvf");
-                if (File.Exists(exact))
-                    return exact;
-
-                foreach (var serverDir in Directory.GetDirectories(codesRoot, "ServerS4A21_*")
-                    .OrderByDescending(path => path, StringComparer.OrdinalIgnoreCase))
-                {
-                    foreach (var path in new[]
-                    {
-                        Path.Combine(serverDir, "dist", "linux-x64", "Data", "Pvf", "Script.pvf"),
-                        Path.Combine(serverDir, "Server", "DfoServer", "bin", "Release", "win-x64", "Data", "Pvf", "Script.pvf"),
-                        Path.Combine(serverDir, "Server", "DfoServer", "bin", "Release", "linux-x64", "Data", "Pvf", "Script.pvf"),
-                        Path.Combine(serverDir, "Server", "DfoServer", "bin", "Debug", "Data", "Pvf", "Script.pvf"),
-                        Path.Combine(serverDir, "Server", "DfoServer", "Data", "Pvf", "Script.pvf"),
-                    })
-                    {
-                        if (File.Exists(path))
-                            return path;
-                    }
-                }
-            }
-            return null;
-        }
-
-        private static string[] EnumerateSearchRoots()
-        {
-            var roots = new List<string>();
-            AddRoot(roots, Directory.GetCurrentDirectory());
-            AddRoot(roots, AppContext.BaseDirectory);
-
-            var dir = new DirectoryInfo(AppContext.BaseDirectory);
-            for (var i = 0; i < 8 && dir != null; i++, dir = dir.Parent)
-                AddRoot(roots, dir.FullName);
-
-            return roots.ToArray();
-        }
-
-        private static void AddRoot(List<string> roots, string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-                return;
-            try
-            {
-                path = Path.GetFullPath(path);
-            }
-            catch
-            {
-                return;
-            }
-            if (!roots.Contains(path))
-                roots.Add(path);
-        }
+        private static string ResolveLatestServerPvf() => SelfTestPvfLocator.ResolveLatestServerPvf();
 
         private static void WaitForIndex(PvfIndexService index)
         {

@@ -410,22 +410,7 @@ CREATE TABLE IF NOT EXISTS item_audit_log (
             command.ExecuteNonQuery();
         }
 
-        private static string ResolveLatestServerPvf()
-        {
-            var roots = new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
-            foreach (var root in roots)
-            {
-                var current = new DirectoryInfo(root);
-                for (var depth = 0; current != null && depth < 8; depth++, current = current.Parent)
-                {
-                    var codes = Path.Combine(current.FullName, "Codes");
-                    var exact = Path.Combine(codes, "ServerS4A21_git", "Server", "DfoServer", "Data", "Pvf", "Script.pvf");
-                    if (File.Exists(exact))
-                        return exact;
-                }
-            }
-            return null;
-        }
+        private static string ResolveLatestServerPvf() => SelfTestPvfLocator.ResolveLatestServerPvf();
 
         private static void SeedOwnerRows(string path)
         {

@@ -320,22 +320,7 @@ VALUES('character',10,10,0,65,{petEntry.Id},'stackable',1,1),
             }
         }
 
-        private static string ResolveLatestServerPvf()
-        {
-            var roots = new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
-            foreach (var root in roots)
-            {
-                var current = new DirectoryInfo(root);
-                for (var depth = 0; current != null && depth < 8; depth++, current = current.Parent)
-                {
-                    var codes = Path.Combine(current.FullName, "Codes");
-                    var exact = Path.Combine(codes, "ServerS4A21_git", "Server", "DfoServer", "Data", "Pvf", "Script.pvf");
-                    if (File.Exists(exact))
-                        return exact;
-                }
-            }
-            return null;
-        }
+        private static string ResolveLatestServerPvf() => SelfTestPvfLocator.ResolveLatestServerPvf();
 
         private static bool HasCoreInRange(string path, int character, int list, int start, int end, int itemId, byte kind)
         {
